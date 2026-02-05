@@ -1,0 +1,585 @@
+// DeepReviewScreen: progress bar, section header, content area
+// DeepReviewScreen states: reviewing, waiting_ai, error, completed
+// DeepReviewScreen keybindings: n/p navigate, Enter submit, q quit
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
+
+use super::ScreenTrait;
+use crate::error::Result;
+use crate::models::{AppState, Screen};
+
+/// Deep review screen for reviewing sections marked as shaky or lost
+pub struct DeepReviewScreen {
+    /// Index into sections needing review
+    current_review_index: usize,
+}
+
+impl DeepReviewScreen {
+    pub fn new() -> Self {
+        Self {
+            current_review_index: 0,
+        }
+    }
+
+    /// Get sections that need review (shaky or lost, not yet reviewed)
+    fn get_sections_needing_review<'a>(
+        &self,
+        state: &'a AppState,
+    ) -> Vec<(usize, &'a crate::models::Section)> {
+        state
+            .session
+            .sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.needs_review() && !s.is_reviewed())
+            .collect()
+    }
+
+    /// Get total count of sections that need review (including reviewed ones)
+    fn total_needing_review(&self, state: &AppState) -> usize {
+        state
+            .session
+            .sections
+            .iter()
+            .filter(|s| s.needs_review())
+            .count()
+    }
+
+    /// Get count of reviewed sections
+    fn reviewed_count(&self, state: &AppState) -> usize {
+        state
+            .session
+            .sections
+            .iter()
+            .filter(|s| s.needs_review() && s.is_reviewed())
+            .count()
+    }
+}
+
+impl Default for DeepReviewScreen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScreenTrait for DeepReviewScreen {
+    fn render(&self, frame: &mut Frame, state: &AppState) {
+        let area = frame.area();
+
+        // Handle error state
+        if let Some(error) = &state.ui.error {
+            self.render_error(frame, area, error);
+            return;
+        }
+
+        // Check if all reviews are complete
+        let needs_review = self.get_sections_needing_review(state);
+        if needs_review.is_empty() && self.reviewed_count(state) > 0 {
+            self.render_completed(frame, area, state);
+            return;
+        }
+
+        // Handle empty case (no sections need review)
+        if needs_review.is_empty() {
+            self.render_empty(frame, area);
+            return;
+        }
+
+        // Main layout
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Progress bar
+                Constraint::Length(4), // Section header
+                Constraint::Min(0),    // Content area
+                Constraint::Length(2), // Footer hints
+            ])
+            .split(area);
+
+        self.render_progress(frame, layout[0], state);
+        self.render_section_header(frame, layout[1], state, &needs_review);
+        self.render_content(frame, layout[2], state, &needs_review);
+        self.render_footer(frame, layout[3], state);
+    }
+
+    fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
+        // Handle error state
+        if state.ui.error.is_some() {
+            return match key.code {
+                KeyCode::Char('q') => {
+                    state.quit();
+                    Ok(true)
+                }
+                KeyCode::Char('r') => {
+                    state.ui.clear_error();
+                    Ok(true)
+                }
+                KeyCode::Char('s') => {
+                    // Skip current section
+                    self.advance_to_next(state);
+                    state.ui.clear_error();
+                    Ok(true)
+                }
+                _ => Ok(false),
+            };
+        }
+
+        // Check if all reviews are complete
+        let needs_review = self.get_sections_needing_review(state);
+        if needs_review.is_empty() && self.reviewed_count(state) > 0 {
+            return match key.code {
+                KeyCode::Char('q') => {
+                    state.quit();
+                    Ok(true)
+                }
+                KeyCode::Enter => {
+                    state.goto(Screen::Summary);
+                    Ok(true)
+                }
+                _ => Ok(false),
+            };
+        }
+
+        match key.code {
+            KeyCode::Char('q') => {
+                state.quit();
+                Ok(true)
+            }
+            // Navigate to next unreviewed section
+            KeyCode::Char('n') => {
+                self.advance_to_next(state);
+                Ok(true)
+            }
+            // Navigate to previous section
+            KeyCode::Char('p') => {
+                self.go_to_previous(state);
+                Ok(true)
+            }
+            // Enter to start reviewing current section
+            KeyCode::Enter => {
+                if !needs_review.is_empty() {
+                    // Set the current section index in state and go to pseudocode review
+                    let (section_idx, _) = needs_review
+                        .get(self.current_review_index.min(needs_review.len() - 1))
+                        .copied()
+                        .unwrap();
+                    state.ui.selected_index = section_idx;
+                    state.goto(Screen::PseudocodeReview);
+                }
+                Ok(true)
+            }
+            // Back to triage
+            KeyCode::Esc => {
+                state.goto(Screen::Triage);
+                Ok(true)
+            }
+            // Scroll code preview (for large diffs)
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(10);
+                Ok(true)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
+                Ok(true)
+            }
+            KeyCode::PageDown => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(20);
+                Ok(true)
+            }
+            KeyCode::PageUp => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(20);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+}
+
+impl DeepReviewScreen {
+    fn render_progress(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let total = self.total_needing_review(state);
+        let reviewed = self.reviewed_count(state);
+        let skipped = state
+            .session
+            .sections
+            .iter()
+            .filter(|s| matches!(s.tag, crate::models::Tag::GotIt))
+            .count();
+
+        let ratio = if total > 0 {
+            reviewed as f64 / total as f64
+        } else {
+            0.0
+        };
+
+        let label = format!(
+            "Reviewing {} of {} sections (skipped {} 'got it')",
+            reviewed + 1,
+            total,
+            skipped
+        );
+
+        let gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title("Progress"))
+            .gauge_style(Style::default().fg(Color::Cyan))
+            .ratio(ratio)
+            .label(label);
+
+        frame.render_widget(gauge, area);
+    }
+
+    fn render_section_header(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        _state: &AppState,
+        needs_review: &[(usize, &crate::models::Section)],
+    ) {
+        let idx = self
+            .current_review_index
+            .min(needs_review.len().saturating_sub(1));
+
+        let (title, description) = if let Some((_, section)) = needs_review.get(idx) {
+            (
+                format!("{} ({})", section.title, section.tag.label()),
+                section.description.as_str(),
+            )
+        } else {
+            ("No section".to_string(), "")
+        };
+
+        let header = Paragraph::new(description)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(header, area);
+    }
+
+    fn render_content(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        state: &AppState,
+        needs_review: &[(usize, &crate::models::Section)],
+    ) {
+        let idx = self
+            .current_review_index
+            .min(needs_review.len().saturating_sub(1));
+        let section = needs_review.get(idx).map(|(_, s)| *s);
+
+        if state.ui.ai_loading {
+            // Waiting for AI state - show spinner overlay
+            let text = "Waiting for AI response...\n\nYou can navigate away with 'n'/'p' keys.";
+            let paragraph = Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Processing")
+                        .border_style(Style::default().fg(Color::Yellow)),
+                )
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        } else if let Some(section) = section {
+            // Show code preview with hint to enter
+            let code_lines: Vec<Line> = section
+                .code
+                .lines()
+                .map(|line| {
+                    let style = if line.starts_with('+') && !line.starts_with("+++") {
+                        Style::default().fg(Color::Green)
+                    } else if line.starts_with('-') && !line.starts_with("---") {
+                        Style::default().fg(Color::Red)
+                    } else if line.starts_with("@@") {
+                        Style::default().fg(Color::Cyan)
+                    } else if line.starts_with("diff") || line.starts_with("index") {
+                        Style::default().fg(Color::Blue)
+                    } else {
+                        Style::default()
+                    };
+                    Line::styled(line, style)
+                })
+                .collect();
+
+            let paragraph = Paragraph::new(code_lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Code - Press Enter to review"),
+                )
+                .scroll((state.ui.scroll_offset as u16, 0));
+
+            frame.render_widget(paragraph, area);
+        } else {
+            let paragraph = Paragraph::new("No section selected")
+                .block(Block::default().borders(Borders::ALL).title("Code"))
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+    }
+
+    fn render_footer(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
+        let hints =
+            "n: next unreviewed | p: previous | Enter: submit | Esc: back | q: quit (saved)";
+        let footer = Paragraph::new(hints)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(footer, area);
+    }
+
+    fn render_completed(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let total = self.total_needing_review(state);
+        let text = format!(
+            "All {} sections reviewed!\n\nPress Enter to view summary.",
+            total
+        );
+
+        let paragraph = Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Deep Review")
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Green));
+
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_empty(&self, frame: &mut Frame, area: Rect) {
+        let text = "No sections need deep review.\n\nPress Esc to go back to triage.";
+        let paragraph = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title("Deep Review"))
+            .alignment(Alignment::Center);
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_error(&self, frame: &mut Frame, area: Rect, error: &str) {
+        let text = format!(
+            "Error: {}\n\nPress 'r' to retry, 's' to skip, or 'q' to quit",
+            error
+        );
+
+        let paragraph = Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Deep Review")
+                    .border_style(Style::default().fg(Color::Red)),
+            )
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Red));
+
+        frame.render_widget(paragraph, area);
+    }
+
+    fn advance_to_next(&mut self, state: &AppState) {
+        let needs_review = self.get_sections_needing_review(state);
+        if !needs_review.is_empty() {
+            self.current_review_index = (self.current_review_index + 1) % needs_review.len();
+        }
+    }
+
+    fn go_to_previous(&mut self, state: &AppState) {
+        let needs_review = self.get_sections_needing_review(state);
+        if !needs_review.is_empty() {
+            if self.current_review_index == 0 {
+                self.current_review_index = needs_review.len() - 1;
+            } else {
+                self.current_review_index -= 1;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Assessment, Section, Session, Tag};
+
+    fn create_test_state() -> AppState {
+        let mut session = Session::new("test".to_string(), "".to_string());
+        session.sections = vec![
+            Section::new(
+                "s1".to_string(),
+                "Section 1".to_string(),
+                "Description 1".to_string(),
+                "code".to_string(),
+            ),
+            Section::new(
+                "s2".to_string(),
+                "Section 2".to_string(),
+                "Description 2".to_string(),
+                "code".to_string(),
+            ),
+            Section::new(
+                "s3".to_string(),
+                "Section 3".to_string(),
+                "Description 3".to_string(),
+                "code".to_string(),
+            ),
+        ];
+        // Tag section 1 as got it, sections 2 and 3 need review
+        session.sections[0].tag = Tag::GotIt;
+        session.sections[1].tag = Tag::Shaky;
+        session.sections[2].tag = Tag::Lost;
+        AppState::new(session)
+    }
+
+    #[test]
+    fn test_deep_review_screen_new() {
+        let screen = DeepReviewScreen::new();
+        assert_eq!(screen.current_review_index, 0);
+    }
+
+    #[test]
+    fn test_deep_review_sections_needing_review() {
+        let screen = DeepReviewScreen::new();
+        let state = create_test_state();
+
+        let needs_review = screen.get_sections_needing_review(&state);
+        assert_eq!(needs_review.len(), 2);
+        assert_eq!(needs_review[0].1.title, "Section 2");
+        assert_eq!(needs_review[1].1.title, "Section 3");
+    }
+
+    #[test]
+    fn test_deep_review_navigation() {
+        let mut screen = DeepReviewScreen::new();
+        let state = create_test_state();
+
+        screen.advance_to_next(&state);
+        assert_eq!(screen.current_review_index, 1);
+
+        screen.advance_to_next(&state);
+        assert_eq!(screen.current_review_index, 0); // Wraps around
+
+        screen.go_to_previous(&state);
+        assert_eq!(screen.current_review_index, 1);
+    }
+
+    #[test]
+    fn test_deep_review_handle_quit() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+
+        let key = KeyEvent::new(
+            crossterm::event::KeyCode::Char('q'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key, &mut state).unwrap();
+        assert!(state.should_quit);
+    }
+
+    #[test]
+    fn test_deep_review_enter_goes_to_pseudocode() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+
+        let key = KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key, &mut state).unwrap();
+        assert_eq!(state.screen, Screen::PseudocodeReview);
+    }
+
+    #[test]
+    fn test_deep_review_esc_goes_back() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+
+        let key = KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key, &mut state).unwrap();
+        assert_eq!(state.screen, Screen::Triage);
+    }
+
+    #[test]
+    fn test_deep_review_completed_state() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+
+        // Mark all review sections as reviewed
+        state.session.sections[1].assessment = Some(Assessment {
+            correct: vec!["Good".to_string()],
+            diverges: vec![],
+            missed: vec![],
+        });
+        state.session.sections[2].assessment = Some(Assessment {
+            correct: vec!["Good".to_string()],
+            diverges: vec![],
+            missed: vec![],
+        });
+
+        let needs_review = screen.get_sections_needing_review(&state);
+        assert!(needs_review.is_empty());
+        assert_eq!(screen.reviewed_count(&state), 2);
+
+        // Enter should go to summary
+        let key = KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key, &mut state).unwrap();
+        assert_eq!(state.screen, Screen::Summary);
+    }
+
+    #[test]
+    fn test_deep_review_error_skip() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+        state.ui.set_error("Test error");
+
+        let key_s = KeyEvent::new(
+            crossterm::event::KeyCode::Char('s'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_s, &mut state).unwrap();
+
+        assert!(state.ui.error.is_none());
+        assert_eq!(screen.current_review_index, 1); // Advanced to next
+    }
+
+    #[test]
+    fn test_deep_review_waiting_ai_state() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+        state.ui.ai_loading = true;
+
+        // Navigation should still work during AI loading
+        let key_n = KeyEvent::new(
+            crossterm::event::KeyCode::Char('n'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_n, &mut state).unwrap();
+        assert_eq!(screen.current_review_index, 1);
+
+        let key_p = KeyEvent::new(
+            crossterm::event::KeyCode::Char('p'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_p, &mut state).unwrap();
+        assert_eq!(screen.current_review_index, 0);
+    }
+
+    #[test]
+    fn test_deep_review_error_retry() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+        state.ui.set_error("Test error");
+
+        let key_r = KeyEvent::new(
+            crossterm::event::KeyCode::Char('r'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_r, &mut state).unwrap();
+
+        assert!(state.ui.error.is_none());
+        // Index should not change on retry
+        assert_eq!(screen.current_review_index, 0);
+    }
+}

@@ -1,0 +1,224 @@
+# implementation_plan: v1
+id: PLAN-CODE-REVIEW-TUI
+title: Code Review TUI Implementation Plan
+created: 2026-02-04
+spec: docs/specifications/ux-code-review-tui.yaml
+type: ux
+review_strategy: final_only
+
+phases:
+  - id: PHASE-1
+    name: "Foundation"
+    implements: []
+    depends_on: []
+    status: completed
+    description: >
+      Set up project structure, CLI parsing, app shell with Ratatui,
+      core data models, session persistence, and git diff reading.
+      This phase establishes all infrastructure that screens depend on.
+    tasks:
+      - id: P1-T1
+        description: "Initialize Rust project with Cargo.toml and dependencies (ratatui, crossterm, clap, serde, serde_json)"
+        status: completed
+      - id: P1-T2
+        description: "Create CLI argument parser: optional commit count (e.g., 5), --new flag (user_stories[0])"
+        status: completed
+      - id: P1-T3
+        description: "Implement git diff reading: N commits back (HEAD~N..HEAD) or branch vs main/master"
+        status: completed
+      - id: P1-T4
+        description: "Define core data models: Section (id, title, description, code, tag), Session, ReviewState"
+        status: completed
+      - id: P1-T4a
+        description: "Define AiClient trait with chunk_diff() and assess_hypothesis() method signatures for PHASE-2/3 parallel work"
+        status: completed
+      - id: P1-T4b
+        description: "Define ChunkingResult and AssessmentResult types with Success/Error variants for shared interface"
+        status: completed
+      - id: P1-T5
+        description: "Implement session persistence: save/load to ~/.sherpa/sessions/<hash>.json (session_matching)"
+        status: completed
+      - id: P1-T6
+        description: "Create app shell: terminal setup, main event loop, screen routing (flows)"
+        status: completed
+      - id: P1-T7
+        description: "Implement session save on quit/Ctrl+C; detect corrupted JSON on load and offer fresh start (testing_focus[0])"
+        status: completed
+      - id: P1-T8
+        description: "Write tests: CLI parsing, session save/load, git diff parsing"
+        status: completed
+    verification:
+      tests: |
+        cargo test verifies:
+        - CLI parsing: commit count (sherpa 5), no args (branch vs main), --new flag, invalid input error messages
+        - Session persistence: save/load roundtrip, corrupted JSON detection offers fresh start
+        - Git diff: parses unified diff format, handles empty diff, detects main vs master
+      acceptance: |
+        - Running `sherpa 3` enters app shell with last 3 commits, session file created
+        - Running `sherpa` on feature branch diffs against main/master
+        - Corrupted session file detected on load, user offered fresh start
+        - Invalid input `sherpa --bad-flag` shows helpful error message
+
+  - id: PHASE-2
+    name: "AI Integration"
+    implements: []
+    depends_on: [PHASE-1]
+    status: completed
+    description: >
+      Implement Claude subprocess integration for diff chunking and
+      hypothesis assessment. This is separate from UI to enable parallel
+      development with Phase 3.
+    tasks:
+      - id: P2-T1
+        description: "Create AI client: spawn `claude --dangerously-skip-permissions -p` subprocess (ai.method)"
+        status: completed
+      - id: P2-T2
+        description: "Implement chunking prompt: send diff, receive sections ordered by importance - core types first, utilities last (user_stories[1])"
+        status: completed
+      - id: P2-T3
+        description: "Implement assessment prompt: send hypothesis + code, receive Correct/Diverges/Missed (user_stories[3])"
+        status: completed
+      - id: P2-T4
+        description: "Handle AI errors gracefully: non-JSON output, subprocess failure (testing_focus[1])"
+        status: completed
+      - id: P2-T5
+        description: "Ensure single concurrent AI call with navigation allowed during wait (ai.concurrency)"
+        status: completed
+      - id: P2-T6
+        description: "Write tests: AI client mocked, prompt formatting, response parsing, error handling"
+        status: completed
+    verification:
+      tests: "cargo test - AI client tests pass with mocked subprocess"
+      acceptance: "AI chunking returns valid sections; assessment returns structured feedback"
+
+  - id: PHASE-3
+    name: "Screens"
+    implements: [LoadingScreen, TriageScreen, DeepReviewScreen, PseudocodeReviewScreen, SummaryScreen]
+    depends_on: [PHASE-1]
+    status: completed
+    description: >
+      Implement all 5 screens with their states, components, and keybindings.
+      Uses stub data for AI responses to enable parallel development.
+    tasks:
+      # LoadingScreen
+      - id: P3-T1
+        description: "Implement LoadingScreen: spinner, status text, error state with retry (screens[0])"
+        status: completed
+      # TriageScreen
+      - id: P3-T2
+        description: "Implement TriageScreen section list panel: scrollable, badges for tags (screens[1].components[0])"
+        status: completed
+      - id: P3-T3
+        description: "Implement TriageScreen code preview panel: syntax highlighted diff view (screens[1].components[1])"
+        status: completed
+      - id: P3-T4
+        description: "Implement TriageScreen keybindings: j/k navigate, 1/2/3 tag, Enter proceed, q quit (screens[1].components[4])"
+        status: completed
+      - id: P3-T4a
+        description: "Implement TriageScreen progress indicator: 'X/Y sections tagged' counter (screens[1].components[3])"
+        status: completed
+      - id: P3-T5
+        description: "Implement TriageScreen states: default, all_tagged, empty, error (screens[1].screen_states)"
+        status: completed
+      # DeepReviewScreen
+      - id: P3-T6
+        description: "Implement DeepReviewScreen: progress bar, section header, content area (screens[2])"
+        status: completed
+      - id: P3-T7
+        description: "Implement DeepReviewScreen states: reviewing, waiting_ai, error, completed (screens[2].screen_states)"
+        status: completed
+      - id: P3-T8
+        description: "Implement DeepReviewScreen keybindings: n/p navigate, Enter submit, q quit (screens[2].components[3])"
+        status: completed
+      # PseudocodeReviewScreen
+      - id: P3-T9
+        description: "Implement PseudocodeReviewScreen: code panel (top 80%), text input (bottom 20%) (screens[3])"
+        status: completed
+      - id: P3-T10
+        description: "Implement PseudocodeReviewScreen AI response display: Correct/Diverges/Missed sections (screens[3].screen_states.ai_response)"
+        status: completed
+      - id: P3-T11
+        description: "Implement hypothesis preservation on error and retry (invariants[3])"
+        status: completed
+      # SummaryScreen
+      - id: P3-T12
+        description: "Implement SummaryScreen: confidence breakdown, accuracy breakdown, misconceptions list (screens[4])"
+        status: completed
+      - id: P3-T13
+        description: "Implement markdown export to docs/sherpa-review-<date>-<time>.md (export)"
+        status: completed
+      # Navigation
+      - id: P3-T14
+        description: "Implement screen navigation and backstack behavior (flows[0].backstack)"
+        status: completed
+      - id: P3-T15
+        description: "Write tests: each screen renders correctly, keybindings work, state transitions"
+        status: completed
+    verification:
+      tests: |
+        Per-screen test requirements:
+        - LoadingScreen: renders loading state, error state shows retry hint (r key)
+        - TriageScreen: all 4 states (default, all_tagged, empty, error); j/k navigation; 1/2/3 tagging updates badges; progress counter updates
+        - DeepReviewScreen: all 4 states (reviewing, waiting_ai, error, completed); navigation during waiting_ai state works
+        - PseudocodeReviewScreen: all 4 states; user text preserved in error state; retry (r) works
+        - SummaryScreen: default and exported states; export creates file at docs/sherpa-review-*.md
+      acceptance: |
+        - Navigate through all screens with stub data
+        - All keybindings respond correctly per spec
+        - Tagging all sections 'got it' skips DeepReview to Summary
+        - Back navigation works per backstack spec
+        - Export creates file with confirmation message
+      temporary_stubs: "AI responses stubbed via mock AiClient implementation"
+
+  - id: PHASE-4
+    name: "Integration"
+    implements: []
+    depends_on: [PHASE-2, PHASE-3]
+    status: completed
+    description: >
+      Wire AI integration into screens, implement full flows,
+      remove stubs, and validate end-to-end behavior.
+    tasks:
+      - id: P4-T1
+        description: "Wire AI chunking into LoadingScreen (flows[0].steps[0])"
+        status: completed
+      - id: P4-T2
+        description: "Wire AI assessment into PseudocodeReviewScreen (flows[1].steps[0])"
+        status: completed
+      - id: P4-T3
+        description: "Implement Complete Review Flow with all edge cases including 'all got it' skips to Summary (flows[0])"
+        status: completed
+      - id: P4-T3a
+        description: "Implement draft hypothesis auto-save on each keystroke (state.persistent[2])"
+        status: completed
+      - id: P4-T4
+        description: "Implement Section Deep Dive flow with edge cases (flows[1])"
+        status: completed
+      - id: P4-T5
+        description: "Implement session auto-resume on matching identifier (session_matching)"
+        status: completed
+      - id: P4-T6
+        description: "Implement --new flag to force fresh session (user_stories[5])"
+        status: completed
+      - id: P4-T7
+        description: "Remove all temporary stubs"
+        status: completed
+      - id: P4-T8
+        description: "Handle large diffs: verify chunking and smooth scrolling (testing_focus[2])"
+        status: completed
+      - id: P4-T9
+        description: "Handle special characters in code/hypothesis (testing_focus[3])"
+        status: completed
+      - id: P4-T10
+        description: "Write E2E tests: complete review flow, session resume, export"
+        status: completed
+    verification:
+      tests: "cargo test - all tests pass including E2E"
+      acceptance: |
+        - User can run `sherpa 5` and complete full review flow
+        - User can run `sherpa` on feature branch to review against main
+        - Session auto-resumes on same input
+        - `sherpa --new` forces fresh start
+        - Export produces valid markdown
+        - All edge cases handled gracefully
+      cleanup: "All stubs removed, no TODO comments remaining"

@@ -43,10 +43,9 @@ mental_models:
 user_stories:
   - description: User can review a git diff range interactively
     acceptance_criteria:
-      - Running `sherpa HEAD~5..HEAD` launches the TUI with those changes
-      - Running `sherpa --staged` reviews staged changes
-      - Running `sherpa <file-path>` reviews a specific file's changes
-      - Running `sherpa --new <diff-range>` forces a fresh session
+      - Running `sherpa 5` reviews last 5 commits (HEAD~5..HEAD)
+      - Running `sherpa` with no args diffs current branch against main/master
+      - Running `sherpa --new` forces a fresh session (works with either input mode)
       - Invalid input shows helpful error message
 
   - description: User can see code organized into logical sections
@@ -196,9 +195,9 @@ screens:
   - name: PseudocodeReviewScreen
     purpose: Let user write free-text description of what code does
     components:
-      - description: Code display panel (top 60%)
+      - description: Code display panel (top 80%)
         familiarity: Code viewer with syntax highlighting
-      - description: Text input area (bottom 40%)
+      - description: Text input area (bottom 20%)
         familiarity: Multi-line text editor like a commit message input
         copy: "Describe what this code does in your own words..."
       - description: Submit hint
@@ -246,7 +245,7 @@ state:
 
 # Session identity
 session_matching:
-  identifier: "Diff range string (e.g., HEAD~5..HEAD) OR branch name compared to main"
+  identifier: "Commit count (e.g., '5' for HEAD~5..HEAD) OR branch name (for branch vs main)"
   storage_path: "~/.sherpa/sessions/<hash-of-identifier>.json"
   expiration: "Never - sessions persist until user deletes"
   conflict: "If identifier matches existing session, auto-resume; use --new to force fresh"
@@ -290,7 +289,7 @@ invariants:
 # What's risky and needs testing?
 testing_focus:
   - risk: "Session file corruption on unexpected quit (Ctrl+C, kill)"
-    verify: "Session saves atomically (write temp file, rename); recovers gracefully from partial writes"
+    verify: "Detect invalid JSON on load; offer fresh start if corrupted"
   - risk: "Claude subprocess hangs or produces malformed output"
     verify: "App remains responsive; user can navigate away; handles non-JSON output gracefully"
   - risk: "Large diffs overwhelm UI or AI context"
