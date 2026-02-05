@@ -1,0 +1,231 @@
+id: UX-CODE-REVIEW-TUI
+title: Code Review TUI
+created: 2025-02-04
+
+# WHY are we building this?
+problem:
+  statement: >
+    Developers reviewing PRs or AI-generated code often skim changes without
+    truly understanding them. They approve code they don't fully comprehend,
+    leading to bugs, technical debt, and knowledge gaps. There's no tool that
+    forces active engagement and validates understanding before moving on.
+  success_outcomes:
+    - Reviewer can articulate what every section of a diff does before approving
+    - Misconceptions are surfaced and corrected during review, not after merge
+    - Review sessions produce exportable notes documenting the reviewer's understanding
+
+# WHAT are we building?
+scope:
+  in:
+    - Terminal-based code review interface (Ratatui/Rust)
+    - AI-powered section chunking of diffs
+    - Three-stage review flow (Triage, Deep Review, Summary)
+    - Pseudocode review mode (explain what code does)
+    - Session persistence and auto-resume
+    - Markdown export of review notes
+  out:
+    - Git hosting integration (no GitHub/GitLab API calls)
+    - Code editing or applying changes
+    - Multi-user collaboration features
+    - Syntax highlighting customization
+    - Plugin system
+    - Inline annotation mode (future iteration)
+
+mental_models:
+  code_review: >
+    A flashcard study session where you must demonstrate understanding before
+    moving on. Like a teacher asking "explain it back to me" before grading.
+  sections: >
+    Like chapters in a book - logical groupings that build understanding
+    progressively, with core concepts introduced before dependent details.
+
+# User stories
+user_stories:
+  - description: User can review a git diff range interactively
+    acceptance_criteria:
+      - Running `sherpa HEAD~5..HEAD` launches the TUI with those changes
+      - Running `sherpa --staged` reviews staged changes
+      - Running `sherpa <file-path>` reviews a specific file's changes
+      - Running `sherpa --new <diff-range>` forces a fresh session
+      - Invalid input shows helpful error message
+
+  - description: User can see code organized into logical sections
+    acceptance_criteria:
+      - AI groups related changes across files into sections
+      - Each section has a title and short description
+      - Sections are ordered by importance (core types first, utilities last)
+      - Loading state is visible while AI chunks the input
+
+  - description: User can quickly triage all sections before deep review
+    acceptance_criteria:
+      - All sections visible with titles, descriptions, and code preview
+      - User can scroll through sections with j/k keys
+      - User can tag sections as "got it" (1), "shaky" (2), or "lost" (3)
+      - User can proceed to deep review when done tagging
+
+  - description: User can explain their understanding and get AI feedback
+    acceptance_criteria:
+      - Pseudocode mode allows free-text description of what code does
+      - AI response is locked until user submits their hypothesis
+      - AI assessment categorizes response into three sections
+        - "Correct" - points matching AI's analysis of the code
+        - "Diverges" - user interpretations different from actual behavior
+        - "Missed" - code behaviors the user did not identify
+
+  - description: User can see a summary of their review session
+    acceptance_criteria:
+      - Summary shows section counts by confidence level
+      - Summary shows correct vs corrected hypothesis counts
+      - Key misconceptions are listed
+      - User can export full transcript to markdown
+
+  - description: User can resume a previous review session
+    acceptance_criteria:
+      - Progress is auto-saved during session
+      - Running `sherpa` with same input auto-resumes previous session
+      - User can start fresh with `sherpa --new <input>`
+
+# Flows
+flows:
+  - name: Complete Review Flow
+    entry:
+      - from: Terminal
+        trigger: User runs `sherpa <diff-range>`
+        transition: launch
+    steps:
+      - screen: LoadingScreen
+        action: Wait for AI chunking to complete
+        transition: replace
+        edge_cases:
+          - "AI chunking fails → show error with retry option"
+          - "Empty diff → show message, exit gracefully"
+          - "Existing session found → auto-resume to saved state (skip to TriageScreen or DeepReviewScreen)"
+      - screen: TriageScreen
+        action: Tag all sections, press Enter to proceed
+        transition: replace
+        edge_cases:
+          - "All sections tagged 'got it' → show summary directly"
+          - "User quits mid-triage → session saved for resume"
+      - screen: DeepReviewScreen
+        action: Complete all sections requiring review (shaky or lost)
+        transition: replace
+        edge_cases:
+          - "AI response fails → show error overlay with retry or skip options, user input preserved"
+          - "User quits mid-review → session saved for resume"
+      - screen: SummaryScreen
+    backstack:
+      - "From Summary, back returns to last Deep Review section"
+      - "From Deep Review, back returns to previous section or Triage"
+      - "From Triage, back exits the application (session saved)"
+    metrics:
+      why: "Understand where reviewers drop off to improve the flow"
+      track: [flow_started, triage_completed, review_completed, export_triggered]
+
+  - name: Section Deep Dive
+    entry:
+      - from: DeepReviewScreen
+        trigger: System routes to section for review
+        transition: replace
+    steps:
+      - screen: PseudocodeReviewScreen
+        action: Write hypothesis, press Enter to submit, view AI response
+        edge_cases:
+          - "AI response fails → show error, allow retry or skip section"
+          - "User presses back before submitting → confirm abandonment or save draft"
+      - screen: DeepReviewScreen
+        action: System advances to next unreviewed section
+    backstack:
+      - "Back from Pseudocode returns to section list in DeepReview"
+
+# Screens
+screens:
+  - name: LoadingScreen
+    purpose: Show progress while AI chunks the diff into sections
+    components:
+      - description: Spinner animation with status text
+        familiarity: Loading spinner from any modern application
+        copy: "Analyzing changes..."
+    screen_states:
+      loading: "Spinner visible with status text"
+      error: "Error message with retry option (r) and exit option (q); suggests checking input format for persistent errors"
+
+  - name: TriageScreen
+    purpose: Let user quickly assess all sections and mark confidence levels
+    components:
+      - description: Section list panel (left side, 40% width)
+        familiarity: Email inbox list showing sender, subject, preview
+        states:
+          got_it: {badge: "1", color: "dim"}
+          shaky: {badge: "2", color: "yellow"}
+          lost: {badge: "3", color: "red"}
+          untagged: {badge: "-", color: "dim"}
+      - description: Code preview panel (right side, 60% width)
+        familiarity: Email preview pane showing full content of selected item
+      - description: Section title and description header
+        familiarity: Document title bar
+      - description: Progress indicator showing tagged/total sections
+        familiarity: "3/12 sections tagged"
+      - description: Keybinding hints in footer
+        familiarity: Vim-style command hints
+        copy: "j/k: navigate | 1: got it | 2: shaky | 3: lost | Enter: proceed | q: quit (saved)"
+    screen_states:
+      default: "Section list populated, first section selected, preview showing"
+      all_tagged: "All sections have tags, Enter to proceed highlighted"
+      empty: "No changes to review - message explaining empty state"
+      error: "Error loading sections - retry option with r key"
+
+  - name: DeepReviewScreen
+    purpose: Navigate between sections that need review (shaky or lost)
+    components:
+      - description: Section progress bar showing current position
+        familiarity: Carousel/slideshow position indicator
+        copy: "Reviewing 2 of 4 sections (skipped 3 'got it')"
+      - description: Current section header with title and description
+        familiarity: Chapter heading in a book
+      - description: Section content area showing PseudocodeReviewScreen
+        familiarity: Content area for review
+      - description: Navigation hints in footer
+        familiarity: Vim-style command hints
+        copy: "n: next unreviewed | p: previous | Enter: submit | q: quit (saved)"
+    screen_states:
+      reviewing: "Active section displayed, text input focused"
+      waiting_ai: "Spinner overlay while AI processes, section still visible, user can navigate away"
+      error: "Error overlay with retry (r) and skip (s) options, user input preserved"
+      completed: "All sections reviewed, prompt to view summary (Enter)"
+
+  - name: PseudocodeReviewScreen
+    purpose: Let user write free-text description of what code does
+    components:
+      - description: Code display panel (top 60%)
+        familiarity: Code viewer with syntax highlighting
+      - description: Text input area (bottom 40%)
+        familiarity: Multi-line text editor like a commit message input
+        copy: "Describe what this code does in your own words..."
+      - description: Submit hint
+        familiarity: Form submission
+        copy: "Enter: submit hypothesis"
+    screen_states:
+      input: "Code visible, text area focused, waiting for user input"
+      submitted: "Code visible, user text locked, AI response area appears below"
+      ai_response: "Three sections displayed: 'Correct' (green), 'Diverges' (yellow), 'Missed' (dim)"
+      error: "Error message shown, user text preserved, retry button visible (r to retry)"
+
+  - name: SummaryScreen
+    purpose: Show review statistics and allow export
+    components:
+      - description: Confidence breakdown panel
+        familiarity: Statistics dashboard card
+        copy: "Sections: 5 got it | 4 shaky | 3 lost"
+      - description: Accuracy breakdown panel
+        familiarity: Test results summary
+        copy: "Hypotheses: 12 confirmed | 4 corrected"
+      - description: Key misconceptions list
+        familiarity: Error log or issues list
+      - description: Export hint
+        familiarity: Download/save action
+        copy: "e: export to markdown"
+      - description: Session info showing input and duration
+        familiarity: Activity summary footer
+    screen_states:
+      default: "All statistics visible, export option available"
+      exported: "Confirmation message with file path shown"
