@@ -1,4 +1,3 @@
-// @task(P1-T4) Section data model with Tag enum
 use serde::{Deserialize, Serialize};
 
 /// Confidence tag for a section
@@ -13,7 +12,7 @@ pub enum Tag {
 }
 
 impl Tag {
-    #[allow(dead_code)] // Used in PHASE-3 (TriageScreen)
+    /// Get the keyboard shortcut badge for this tag
     pub fn badge(&self) -> &'static str {
         match self {
             Tag::Untagged => "-",
@@ -23,7 +22,7 @@ impl Tag {
         }
     }
 
-    #[allow(dead_code)] // Used in PHASE-3 (TriageScreen)
+    /// Get the human-readable label for this tag
     pub fn label(&self) -> &'static str {
         match self {
             Tag::Untagged => "untagged",

@@ -1,11 +1,11 @@
-// DeepReviewScreen: progress bar, section header, content area
-// DeepReviewScreen states: reviewing, waiting_ai, error, completed
-// DeepReviewScreen keybindings: n/p navigate, Enter submit, q quit
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
 
-use super::ScreenTrait;
+use super::{
+    handle_error_state_input, handle_scroll_input, highlight_diff_lines, render_error_panel,
+    render_footer_hints, ErrorInputResult, ScreenTrait,
+};
 use crate::error::Result;
 use crate::models::{AppState, Screen};
 
@@ -22,7 +22,11 @@ impl DeepReviewScreen {
         }
     }
 
-    /// Get sections that need review (shaky or lost, not yet reviewed)
+    /// Get sections that need review (shaky or lost, not yet reviewed).
+    ///
+    /// Returns `(original_index, section)` pairs where `original_index` is the section's
+    /// position in `session.sections`, not the filtered list. This index is needed for
+    /// correct updates when the user selects a section.
     fn get_sections_needing_review<'a>(
         &self,
         state: &'a AppState,
@@ -104,24 +108,27 @@ impl ScreenTrait for DeepReviewScreen {
     }
 
     fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
-        // Handle error state
+        // Handle error state using shared helper + screen-specific 's' to skip
         if state.ui.error.is_some() {
-            return match key.code {
-                KeyCode::Char('q') => {
+            return match handle_error_state_input(&key) {
+                ErrorInputResult::Quit => {
                     state.quit();
                     Ok(true)
                 }
-                KeyCode::Char('r') => {
+                ErrorInputResult::Retry => {
                     state.ui.clear_error();
                     Ok(true)
                 }
-                KeyCode::Char('s') => {
-                    // Skip current section
-                    self.advance_to_next(state);
-                    state.ui.clear_error();
-                    Ok(true)
+                ErrorInputResult::NotHandled => {
+                    // Screen-specific: 's' to skip current section
+                    if key.code == KeyCode::Char('s') {
+                        self.advance_to_next(state);
+                        state.ui.clear_error();
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
                 }
-                _ => Ok(false),
             };
         }
 
@@ -160,12 +167,12 @@ impl ScreenTrait for DeepReviewScreen {
             KeyCode::Enter => {
                 if !needs_review.is_empty() {
                     // Set the current section index in state and go to pseudocode review
-                    let (section_idx, _) = needs_review
-                        .get(self.current_review_index.min(needs_review.len() - 1))
-                        .copied()
-                        .unwrap();
-                    state.ui.selected_index = section_idx;
-                    state.goto(Screen::PseudocodeReview);
+                    let clamped_index = self.current_review_index.min(needs_review.len() - 1);
+                    if let Some(&(section_idx, _)) = needs_review.get(clamped_index) {
+                        // Note: goto() resets UiState, so set selected_index after goto()
+                        state.goto(Screen::PseudocodeReview);
+                        state.ui.selected_index = section_idx;
+                    }
                 }
                 Ok(true)
             }
@@ -175,23 +182,13 @@ impl ScreenTrait for DeepReviewScreen {
                 Ok(true)
             }
             // Scroll code preview (for large diffs)
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(10);
-                Ok(true)
+            _ => {
+                if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset) {
+                    Ok(consumed)
+                } else {
+                    Ok(false)
+                }
             }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
-                Ok(true)
-            }
-            KeyCode::PageDown => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(20);
-                Ok(true)
-            }
-            KeyCode::PageUp => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(20);
-                Ok(true)
-            }
-            _ => Ok(false),
         }
     }
 }
@@ -282,24 +279,7 @@ impl DeepReviewScreen {
             frame.render_widget(paragraph, area);
         } else if let Some(section) = section {
             // Show code preview with hint to enter
-            let code_lines: Vec<Line> = section
-                .code
-                .lines()
-                .map(|line| {
-                    let style = if line.starts_with('+') && !line.starts_with("+++") {
-                        Style::default().fg(Color::Green)
-                    } else if line.starts_with('-') && !line.starts_with("---") {
-                        Style::default().fg(Color::Red)
-                    } else if line.starts_with("@@") {
-                        Style::default().fg(Color::Cyan)
-                    } else if line.starts_with("diff") || line.starts_with("index") {
-                        Style::default().fg(Color::Blue)
-                    } else {
-                        Style::default()
-                    };
-                    Line::styled(line, style)
-                })
-                .collect();
+            let code_lines: Vec<Line> = highlight_diff_lines(&section.code);
 
             let paragraph = Paragraph::new(code_lines)
                 .block(
@@ -320,11 +300,8 @@ impl DeepReviewScreen {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
         let hints =
-            "n: next unreviewed | p: previous | Enter: submit | Esc: back | q: quit (saved)";
-        let footer = Paragraph::new(hints)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(footer, area);
+            "n: next unreviewed | p: previous | Enter: start review | Esc: back | q: quit (saved)";
+        render_footer_hints(frame, area, hints);
     }
 
     fn render_completed(&self, frame: &mut Frame, area: Rect, state: &AppState) {
@@ -356,22 +333,13 @@ impl DeepReviewScreen {
     }
 
     fn render_error(&self, frame: &mut Frame, area: Rect, error: &str) {
-        let text = format!(
-            "Error: {}\n\nPress 'r' to retry, 's' to skip, or 'q' to quit",
-            error
+        render_error_panel(
+            frame,
+            area,
+            "Deep Review",
+            error,
+            "Press 'r' to retry, 's' to skip, or 'q' to quit",
         );
-
-        let paragraph = Paragraph::new(text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Deep Review")
-                    .border_style(Style::default().fg(Color::Red)),
-            )
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Red));
-
-        frame.render_widget(paragraph, area);
     }
 
     fn advance_to_next(&mut self, state: &AppState) {
@@ -581,5 +549,44 @@ mod tests {
         assert!(state.ui.error.is_none());
         // Index should not change on retry
         assert_eq!(screen.current_review_index, 0);
+    }
+
+    #[test]
+    fn test_deep_review_out_of_bounds_index_clamps_correctly() {
+        let mut screen = DeepReviewScreen::new();
+        let mut state = create_test_state();
+
+        // needs_review has 2 sections (indices 0 and 1)
+        let needs_review = screen.get_sections_needing_review(&state);
+        assert_eq!(needs_review.len(), 2);
+
+        // Set current_review_index to out-of-bounds value (simulating sections being removed)
+        screen.current_review_index = 10;
+
+        // advance_to_next should wrap around correctly using modulo
+        screen.advance_to_next(&state);
+        // (10 + 1) % 2 = 1
+        assert_eq!(screen.current_review_index, 1);
+
+        // Reset to out-of-bounds
+        screen.current_review_index = 10;
+
+        // go_to_previous should also handle out-of-bounds
+        // Since 10 != 0, it decrements: 10 - 1 = 9
+        screen.go_to_previous(&state);
+        assert_eq!(screen.current_review_index, 9);
+
+        // Now test that rendering clamps correctly by checking Enter navigates properly
+        screen.current_review_index = 100;
+        let key = KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        // This should not panic and should clamp to valid index
+        screen.handle_input(key, &mut state).unwrap();
+        assert_eq!(state.screen, Screen::PseudocodeReview);
+        // selected_index should be set to a valid section index (clamped)
+        // needs_review[1] is the last valid index, which maps to session.sections[2]
+        assert_eq!(state.ui.selected_index, 2);
     }
 }

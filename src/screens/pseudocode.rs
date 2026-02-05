@@ -1,11 +1,11 @@
-// PseudocodeReviewScreen: code panel (top 80%), text input (bottom 20%)
-// PseudocodeReviewScreen AI response display: Correct/Diverges/Missed sections
-// Implement hypothesis preservation on error and retry
 use crossterm::event::KeyEvent;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use super::ScreenTrait;
+use super::{
+    handle_error_state_input, highlight_diff_lines, render_footer_hints, ErrorInputResult,
+    ScreenTrait,
+};
 use crate::error::Result;
 use crate::models::{AppState, Screen};
 
@@ -16,10 +16,6 @@ pub enum PseudocodeState {
     Input,
     /// Hypothesis submitted, waiting for AI response
     Submitted,
-    /// Showing AI response
-    Response,
-    /// Error occurred during AI assessment
-    Error,
 }
 
 /// Screen for writing and submitting hypotheses about code sections
@@ -52,10 +48,11 @@ impl ScreenTrait for PseudocodeReviewScreen {
         }
 
         // Check if we have an AI response - this takes priority over submitted state
-        let section = state.current_section();
-        if section.is_some() && section.unwrap().assessment.is_some() {
-            self.render_response(frame, area, state);
-            return;
+        if let Some(section) = state.current_section() {
+            if section.assessment.is_some() {
+                self.render_response(frame, area, state);
+                return;
+            }
         }
 
         // Check if waiting for AI response (submitted but no response yet)
@@ -71,25 +68,42 @@ impl ScreenTrait for PseudocodeReviewScreen {
     fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
         use crossterm::event::KeyCode;
 
-        // Handle error state - hypothesis is preserved
+        // Reset internal state when returning to this screen after navigation.
+        // This handles the case where user pressed Esc during Submitted state -
+        // we need to restore Input mode since no AI response is pending.
+        // Conditions: in Submitted state but no error, no assessment, and no pending retry.
+        let section = state.current_section();
+        let has_assessment = section.is_some_and(|s| s.assessment.is_some());
+        if matches!(self.state, PseudocodeState::Submitted)
+            && state.ui.error.is_none()
+            && !has_assessment
+            && !state.ui.needs_assessment_retry
+        {
+            self.state = PseudocodeState::Input;
+        }
+
+        // Handle error state using shared helper + screen-specific behavior
         if state.ui.error.is_some() {
-            return match key.code {
-                KeyCode::Char('q') => {
+            return match handle_error_state_input(&key) {
+                ErrorInputResult::Quit => {
                     state.quit();
                     Ok(true)
                 }
-                KeyCode::Char('r') => {
+                ErrorInputResult::Retry => {
                     // Retry with preserved hypothesis
                     state.ui.request_assessment_retry();
                     self.state = PseudocodeState::Submitted;
                     Ok(true)
                 }
-                KeyCode::Esc => {
-                    // Go back to deep review, hypothesis preserved in draft
-                    state.goto(Screen::DeepReview);
-                    Ok(true)
+                ErrorInputResult::NotHandled => {
+                    // Screen-specific: Esc goes back with hypothesis preserved
+                    if key.code == KeyCode::Esc {
+                        state.goto(Screen::DeepReview);
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
                 }
-                _ => Ok(false),
             };
         }
 
@@ -105,20 +119,21 @@ impl ScreenTrait for PseudocodeReviewScreen {
         }
 
         // Check if we're viewing AI response
-        let section = state.current_section();
-        if section.is_some() && section.unwrap().assessment.is_some() {
-            return match key.code {
-                KeyCode::Char('q') => {
-                    state.quit();
-                    Ok(true)
-                }
-                KeyCode::Enter | KeyCode::Esc => {
-                    // Return to deep review
-                    state.goto(Screen::DeepReview);
-                    Ok(true)
-                }
-                _ => Ok(false),
-            };
+        if let Some(section) = state.current_section() {
+            if section.assessment.is_some() {
+                return match key.code {
+                    KeyCode::Char('q') => {
+                        state.quit();
+                        Ok(true)
+                    }
+                    KeyCode::Enter | KeyCode::Esc => {
+                        // Return to deep review
+                        state.goto(Screen::DeepReview);
+                        Ok(true)
+                    }
+                    _ => Ok(false),
+                };
+            }
         }
 
         // Input mode handling
@@ -135,9 +150,10 @@ impl ScreenTrait for PseudocodeReviewScreen {
                 Ok(true)
             }
             KeyCode::Backspace => {
-                if state.ui.cursor_position > 0 {
-                    state.ui.cursor_position -= 1;
-                    state.ui.input_text.remove(state.ui.cursor_position);
+                // Use pop() to safely handle multi-byte UTF-8 characters.
+                // This correctly removes the last character regardless of byte size.
+                if state.ui.input_text.pop().is_some() {
+                    state.ui.cursor_position = state.ui.input_text.len();
                     state.session.draft_hypothesis = Some(state.ui.input_text.clone());
                 }
                 Ok(true)
@@ -276,23 +292,7 @@ impl PseudocodeReviewScreen {
             None => ("No section", ""),
         };
 
-        let code_lines: Vec<Line> = code
-            .lines()
-            .map(|line| {
-                let style = if line.starts_with('+') && !line.starts_with("+++") {
-                    Style::default().fg(Color::Green)
-                } else if line.starts_with('-') && !line.starts_with("---") {
-                    Style::default().fg(Color::Red)
-                } else if line.starts_with("@@") {
-                    Style::default().fg(Color::Cyan)
-                } else if line.starts_with("diff") || line.starts_with("index") {
-                    Style::default().fg(Color::Blue)
-                } else {
-                    Style::default()
-                };
-                Line::styled(line, style)
-            })
-            .collect();
+        let code_lines: Vec<Line> = highlight_diff_lines(code);
 
         let code_para = Paragraph::new(code_lines)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -327,10 +327,7 @@ impl PseudocodeReviewScreen {
 
         // Hints
         let hints = "Enter: submit hypothesis | Esc: back (saves draft)";
-        let footer = Paragraph::new(hints)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(footer, layout[1]);
+        render_footer_hints(frame, layout[1], hints);
     }
 
     fn render_assessment_panel(&self, frame: &mut Frame, area: Rect, state: &AppState) {
@@ -410,15 +407,15 @@ impl PseudocodeReviewScreen {
 
         // Footer hints
         let hints = "Enter: continue | Esc: back to deep review";
-        let footer = Paragraph::new(hints)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(footer, layout[3]);
+        render_footer_hints(frame, layout[3], hints);
     }
 
-    /// Submit the hypothesis for assessment via real AI
+    /// Submit the hypothesis for assessment via real AI.
+    ///
+    /// Uses the retry flag to signal app's main loop to perform assessment.
+    /// The 'retry' naming is a misnomer - this flag triggers both initial
+    /// submissions and actual retries. The main loop handles both cases identically.
     fn submit_hypothesis(&mut self, state: &mut AppState) {
-        // Request AI assessment - the app's main loop will handle the actual call
         state.ui.needs_assessment_retry = true;
         self.state = PseudocodeState::Submitted;
     }
@@ -486,6 +483,39 @@ mod tests {
         screen.handle_input(key_bs, &mut state).unwrap();
         assert_eq!(state.ui.input_text, "tes");
         assert_eq!(state.ui.cursor_position, 3);
+    }
+
+    #[test]
+    fn test_pseudocode_screen_backspace_multibyte_utf8() {
+        let mut screen = PseudocodeReviewScreen::new();
+        let mut state = create_test_state();
+
+        // Type multi-byte characters via handle_input to ensure cursor_position stays in sync
+        let chars = ['h', 'e', 'l', 'l', 'o', '\u{4E2D}', '\u{6587}']; // "hello" + Chinese chars
+        for c in chars {
+            let key = KeyEvent::new(
+                crossterm::event::KeyCode::Char(c),
+                crossterm::event::KeyModifiers::NONE,
+            );
+            screen.handle_input(key, &mut state).unwrap();
+        }
+        // "hello" (5 bytes) + "中" (3 bytes) + "文" (3 bytes) = 11 bytes total
+        assert_eq!(state.ui.input_text, "hello中文");
+        assert_eq!(state.ui.cursor_position, state.ui.input_text.len()); // 11 bytes
+
+        // Backspace should remove the last character ("文"), not panic
+        let key_bs = KeyEvent::new(
+            crossterm::event::KeyCode::Backspace,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_bs, &mut state).unwrap();
+        assert_eq!(state.ui.input_text, "hello中");
+        assert_eq!(state.ui.cursor_position, state.ui.input_text.len()); // 8 bytes
+
+        // Another backspace removes "中"
+        screen.handle_input(key_bs, &mut state).unwrap();
+        assert_eq!(state.ui.input_text, "hello");
+        assert_eq!(state.ui.cursor_position, 5);
     }
 
     #[test]

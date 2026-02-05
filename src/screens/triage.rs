@@ -1,17 +1,16 @@
-// TriageScreen section list panel: scrollable, badges for tags
-// TriageScreen code preview panel: syntax highlighted diff view
-// TriageScreen keybindings: j/k navigate, 1/2/3 tag, Enter proceed, q quit
-// TriageScreen progress indicator: 'X/Y sections tagged' counter
-// TriageScreen states: default, all_tagged, empty, error
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
-use super::ScreenTrait;
+use super::{
+    handle_error_state_input, handle_scroll_input, highlight_diff_lines, render_error_panel,
+    render_footer_hints, ErrorInputResult, ScreenTrait,
+};
 use crate::error::Result;
 use crate::models::{AppState, Screen, Tag};
 
-/// Screen for triaging all sections before deep review
+/// Screen for triaging all sections before deep review.
+/// See `UiState` documentation for the hybrid selection state pattern.
 pub struct TriageScreen {
     list_state: ListState,
 }
@@ -61,19 +60,27 @@ impl ScreenTrait for TriageScreen {
         self.render_footer(frame, layout[2], state);
     }
 
+    /// Handle keyboard input for the triage screen.
+    ///
+    /// # Error Handling Pattern
+    /// All screens use `handle_error_state_input()` for common error keys (q, r), then add
+    /// screen-specific error behavior. For example:
+    /// - TriageScreen: standard q/r only
+    /// - DeepReviewScreen: adds 's' to skip current section
+    /// - PseudocodeReviewScreen: adds Esc to go back with hypothesis preserved
     fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
-        // Handle error state
+        // Handle error state using shared helper
         if state.ui.error.is_some() {
-            return match key.code {
-                KeyCode::Char('q') => {
+            return match handle_error_state_input(&key) {
+                ErrorInputResult::Quit => {
                     state.quit();
                     Ok(true)
                 }
-                KeyCode::Char('r') => {
+                ErrorInputResult::Retry => {
                     state.ui.clear_error();
                     Ok(true)
                 }
-                _ => Ok(false),
+                ErrorInputResult::NotHandled => Ok(false),
             };
         }
 
@@ -125,23 +132,13 @@ impl ScreenTrait for TriageScreen {
                 Ok(true)
             }
             // Scroll code preview (for large diffs)
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(10);
-                Ok(true)
+            _ => {
+                if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset) {
+                    Ok(consumed)
+                } else {
+                    Ok(false)
+                }
             }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
-                Ok(true)
-            }
-            KeyCode::PageDown => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(20);
-                Ok(true)
-            }
-            KeyCode::PageUp => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(20);
-                Ok(true)
-            }
-            _ => Ok(false),
         }
     }
 }
@@ -248,23 +245,7 @@ impl TriageScreen {
         frame.render_widget(desc_paragraph, preview_layout[0]);
 
         // Code preview panel with diff syntax highlighting
-        let code_lines: Vec<Line> = code
-            .lines()
-            .map(|line| {
-                let style = if line.starts_with('+') && !line.starts_with("+++") {
-                    Style::default().fg(Color::Green)
-                } else if line.starts_with('-') && !line.starts_with("---") {
-                    Style::default().fg(Color::Red)
-                } else if line.starts_with("@@") {
-                    Style::default().fg(Color::Cyan)
-                } else if line.starts_with("diff") || line.starts_with("index") {
-                    Style::default().fg(Color::Blue)
-                } else {
-                    Style::default()
-                };
-                Line::styled(line, style)
-            })
-            .collect();
+        let code_lines: Vec<Line> = highlight_diff_lines(code);
 
         let code_paragraph = Paragraph::new(code_lines)
             .block(Block::default().borders(Borders::ALL).title("Code"))
@@ -280,11 +261,7 @@ impl TriageScreen {
             "j/k: navigate | 1: got it | 2: shaky | 3: lost | q: quit (saved)"
         };
 
-        let footer = Paragraph::new(hints)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-
-        frame.render_widget(footer, area);
+        render_footer_hints(frame, area, hints);
     }
 
     fn render_empty(&self, frame: &mut Frame, area: Rect) {
@@ -298,19 +275,7 @@ impl TriageScreen {
     }
 
     fn render_error(&self, frame: &mut Frame, area: Rect, error: &str) {
-        let text = format!("Error: {}\n\nPress 'r' to retry or 'q' to quit", error);
-
-        let paragraph = Paragraph::new(text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Triage")
-                    .border_style(Style::default().fg(Color::Red)),
-            )
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Red));
-
-        frame.render_widget(paragraph, area);
+        render_error_panel(frame, area, "Triage", error, "Press 'r' to retry or 'q' to quit");
     }
 
     fn select_next(&mut self, state: &AppState) {
@@ -564,5 +529,29 @@ mod tests {
         );
         screen.handle_input(key_r, &mut state).unwrap();
         assert!(state.ui.error.is_none());
+    }
+
+    #[test]
+    fn test_triage_screen_single_section_navigation() {
+        let mut screen = TriageScreen::new();
+        let mut session = Session::new("test".to_string(), "".to_string());
+        session.sections = vec![Section::new(
+            "s1".to_string(),
+            "Single Section".to_string(),
+            "Description".to_string(),
+            "code".to_string(),
+        )];
+        let state = AppState::new(session);
+
+        // With single section, navigation should keep selection at 0
+        assert_eq!(screen.list_state.selected(), Some(0));
+
+        // select_next should wrap back to 0
+        screen.select_next(&state);
+        assert_eq!(screen.list_state.selected(), Some(0));
+
+        // select_previous should also stay at 0
+        screen.select_previous(&state);
+        assert_eq!(screen.list_state.selected(), Some(0));
     }
 }

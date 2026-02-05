@@ -1,4 +1,3 @@
-// @task(P1-T4) Define core data models: Section, Session, ReviewState
 mod section;
 mod session;
 mod state;

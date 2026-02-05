@@ -1,8 +1,4 @@
-// @task(P1-T4b) ChunkingResult and AssessmentResult types for shared interface
-//
-// Note: These types are defined here for PHASE-2/3 parallel work but not fully
-// used until those phases are implemented.
-#![allow(dead_code)]
+// Result types for AI operations (chunking and assessment) used throughout the application.
 
 use crate::models::{Assessment, Section};
 
@@ -15,6 +11,7 @@ pub enum ChunkingResult {
     Error(ChunkingError),
 }
 
+#[allow(dead_code)] // Used in tests
 impl ChunkingResult {
     pub fn is_success(&self) -> bool {
         matches!(self, ChunkingResult::Success(_))
@@ -57,6 +54,7 @@ pub enum AssessmentResult {
     Error(AssessmentError),
 }
 
+#[allow(dead_code)] // Used in tests
 impl AssessmentResult {
     pub fn is_success(&self) -> bool {
         matches!(self, AssessmentResult::Success(_))

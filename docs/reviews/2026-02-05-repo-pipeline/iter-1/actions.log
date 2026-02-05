@@ -1,0 +1,323 @@
+# Address Review Results - actions log
+Review: docs/reviews/2026-02-05-repo-pipeline/iter-1/review.md
+Created: 2026-02-04
+---
+[2026-02-05T02:33:55Z] CR-002 | DEFERRED | Architectural decision needed: should ui.selected_index be canonical or should screens own their selection state. Both are used inconsistently.
+CODE: list_state: ListState, // screen owns selection vs state.ui.selected_index
+RULE: Need project convention on whether UI state should be centralized in AppState.ui or owned by individual screen structs - if centralized, FIX to sync; if screen-owned, SKIP and remove ui.selected_index
+CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:33:57Z] CR-004 | SKIPPED | Verified caveat is accurate: requires ~3000+ key presses to overflow, and overflow would just wrap scroll position, not crash. Acceptable edge case.
+CODE: state.ui.scroll_offset as u16 // saturating_add already used for incrementing
+RULE: When u16 overflow requires thousands of user actions and has non-catastrophic behavior (wrapping), do not flag as needing immediate fix
+CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:00Z] CR-005 | DEFERRED | Valid concern but needs human decision on trade-off: add crate dependency for stable hashing vs accept rare session orphaning on Rust upgrades.
+CODE: DefaultHasher::new(); identifier.hash(&mut hasher);
+RULE: Need project convention on external crate dependencies - if minimizing dependencies is valued, SKIP; if cross-version stability matters, FIX with siphasher crate
+CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:01Z] AR-010 | DEFERRED | P2 architecture issue - Result<bool> vs bool return type is a design choice. Changing it affects error handling strategy across all screens. Need human decision on whether to propagate errors or use state-based error reporting.
+CODE: fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool>;
+RULE: When a return type design affects error handling strategy across multiple components, DEFER for human decision on propagation vs state-based error handling
+CAVEAT_QUALITY: accurate | abstraction-reviewer
+[2026-02-05T02:34:03Z] CA-010 | DEFERRED | Task comments may have project management value. Need human decision on whether to remove, keep, or move to CHANGELOG.
+CODE: // @task(P1-T8) Write tests: CLI parsing...
+RULE: Need project convention on @task comment lifecycle - if used for tracking, SKIP; if implementation complete and tracked elsewhere, FIX to remove
+CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:03Z] AR-006 | SKIPPED | Caveat is accurate: screens are lightweight (mostly stateless View objects), pre-allocation avoids creation cost on transitions. Refactoring to enum CurrentScreen would add complexity for minimal benefit in a small TUI.
+CODE: loading_screen: LoadingScreen,
+triage_screen: TriageScreen,
+deep_review_screen: DeepReviewScreen,
+RULE: When App holds all screen instances but each screen is lightweight (stateless renderers), do not flag as over-abstraction. The memory overhead is negligible and avoids allocation churn on screen transitions.
+CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:03Z] TA-015 | SKIPPED | Test already uses pattern matching (contains/ends_with), not exact timestamp comparison - not actually flaky
+CODE: assert!(path.to_string_lossy().contains("sherpa-review")); assert!(path.to_string_lossy().ends_with(".md"));
+RULE: Do not flag timestamp-based filename tests as flaky if they use pattern matching (contains/ends_with) rather than exact string equality
+CAVEAT_QUALITY: missing | test-analysis
+[2026-02-05T02:34:05Z] AR-011 | DEFERRED | P2 abstraction issue - git command error handling could use a helper, but caveat correctly notes string errors are often sufficient for CLI tools. This is a subjective improvement decision.
+CODE: map_err(|e| AppError::Git(format\!("Failed to run git: {}", e)))
+RULE: When suggesting abstractions for CLI tool error handling, DEFER if the current string-based approach is reasonable for the tool's context - let human decide if structured errors add value
+CAVEAT_QUALITY: accurate | abstraction-reviewer
+[2026-02-05T02:34:05Z] AR-009 | SKIPPED | Caveat is accurate: inline struct definition is idiomatic Rust for single-use deserialize types. SectionResponse and AssessmentResponse are only used within their respective parse methods for JSON deserialization and are not part of the public API.
+CODE: #[derive(serde::Deserialize)]
+struct SectionResponse {
+    id: String, title: String, ...
+}
+RULE: When structs are defined inline inside methods and used only for serde deserialization within that method, do not flag as missing-abstraction. Inline definition is acceptable Rust style for single-use types.
+CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:05Z] CA-011 | DEFERRED | Style decision needed: convert task-like header comments to //! module docs or remove. Affects multiple screens consistently.
+CODE: // TriageScreen section list panel: scrollable, badges for tags
+RULE: Need project convention on module header comments - if used as quick reference, keep; if code is self-documenting, remove; if formal docs needed, convert to //! syntax
+CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:06Z] TA-016 | DEFERRED | Valid concern about stale sessions but low priority - needs human decision on whether Drop guard pattern is worth the complexity
+CODE: delete_session(&identifier).ok(); // only runs if test passes
+RULE: Need project convention on test cleanup strategy - if Drop guards are standard, FIX; if manual cleanup is acceptable, SKIP
+CAVEAT_QUALITY: correct-none | test-analysis
+[2026-02-05T02:34:07Z] SEC-002 | DEFERRED | Uses intentional --dangerously-skip-permissions flag for Claude CLI automation. Needs human decision on whether to add user configuration or documentation.
+CODE: Command::new("claude").args(["--dangerously-skip-permissions", "-p", prompt])
+RULE: Need project convention on whether CLI flag usage should be configurable or just documented — if configurable, FIX; if documentation only, separate doc task
+CAVEAT_QUALITY: accurate | security-checker
+[2026-02-05T02:34:09Z] SEC-005 | SKIPPED | Session identifier is validated by clap to be either 'branch' (literal) or 'commits:N' (usize). Injection is not possible.
+CODE: match self.commits { Some(n) => format\!("commits:{}", n), None => "branch".to_string() }
+RULE: When content written to files comes from strongly-typed CLI arguments (usize, enum) parsed by clap, do not flag as injection risk
+CAVEAT_QUALITY: accurate | security-checker
+[2026-02-05T02:34:09Z] WD-002 | DEFERRED | P1 unused dependency but involves architectural choice - remove it vs implement intended diff parsing feature. Needs human decision on product direction.
+CODE: unidiff = "0.4" // declared for diff parsing but raw text sent to AI instead
+RULE: Need project decision on whether AI-only diff chunking is sufficient or if structured parsing should be implemented - if AI-only is acceptable, remove dep; if parsing needed, implement it
+CAVEAT_QUALITY: accurate | wiring-detector
+[2026-02-05T02:34:09Z] PERF-007 | DEFERRED | P2 performance issue with valid caveat - JSON extraction happens once per API call, not per frame. Current 10KB typical responses make this negligible. Can revisit if processing very large AI responses becomes common.
+CODE: text.find(""); text.find('[');
+RULE: When flagging multi-scan patterns in parsing code, assess frequency: if operation runs once per external call (not per frame/tick), and typical data is small, defer as optimization opportunity rather than immediate fix
+CAVEAT_QUALITY: accurate | performance-reviewer
+[2026-02-05T02:34:11Z] AR-003 | DEFERRED | Design decision about error type granularity. Consolidating ChunkingError and AssessmentError now might require undoing if they diverge later. Overhead is minimal (2 small structs with identical fields). Revisit when adding new AI operations to see if error types should share a trait or be unified.
+CODE: pub struct ChunkingError { pub message: String, pub raw_output: Option<String> }
+pub struct AssessmentError { pub message: String, pub raw_output: Option<String> }
+RULE: Need project convention on whether operation-specific error types should be consolidated into a single AiError or kept separate for future divergence. If AI operations are expected to have different error metadata, keep separate; if not, consolidate.
+CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:11Z] CR-010 | DEFERRED | Same-filesystem rename is atomic on POSIX and NTFS. Cross-filesystem would fail, not corrupt. Need human review to determine if tempfile crate dependency is worth the added robustness.
+CODE: let tmp_path = path.with_extension("tmp"); fs::write(&tmp_path, &content)?; fs::rename(&tmp_path, &path)?;
+RULE: Need project decision on cross-platform robustness requirements - if Windows cross-volume support needed, FIX with tempfile; if POSIX-only, SKIP
+CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:12Z] SFH-003 | DEFERRED | UI provides manual retry via 'r' key which is acceptable for interactive TUI. Auto-retry would be a UX enhancement, not a required fix.
+CODE: KeyCode::Char('r') => { state.ui.request_assessment_retry(); self.state = PseudocodeState::Submitted; }
+RULE: Need project convention on whether interactive applications require auto-retry for transient failures — if yes, FIX; if manual retry suffices, SKIP
+CAVEAT_QUALITY: accurate | silent-failure-hunter
+[2026-02-05T02:34:12Z] RD-005 | DEFERRED | P2 reuse issue but caveat about type semantics is valid. ChunkingError vs AssessmentError may need to diverge. Human judgment needed on whether consolidation serves the codebase design.
+CODE: pub struct ChunkingError { pub message: String, pub raw_output: Option<String> }
+pub struct AssessmentError { pub message: String, pub raw_output: Option<String> }
+RULE: When near-duplicate types exist with identical structure, need project guidance on: 1) whether semantic distinction is valuable, 2) whether types are expected to diverge, 3) whether generic consolidation improves or hurts readability
+CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:34:13Z] CA-001 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-002 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-003 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-004 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-005 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-006 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] CA-007 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:13Z] TA-008 | DEFERRED | Fix requires creating a Command execution abstraction for mocking. This is architectural work that needs human judgment on the right pattern (trait injection vs test doubles).
+CODE: let output = Command::new("git").args(["diff", &range]).output()
+RULE: When missing-test issues require introducing new abstractions (traits, mocks, DI) to enable testing, DEFER for human decision on architecture approach
+CAVEAT_QUALITY: missing | test-auditor
+[2026-02-05T02:34:14Z] CS-005 | DEFERRED | P2 style issue with accurate caveat. Code is readable and localized. Extracting closure is subjective style preference.
+CODE: let got_it_width = if total > 0 { (counts.got_it * bar_width) / total } else { 0 };
+RULE: When simple arithmetic pattern is repeated 2-3 times within a single function and is readable, defer to human judgment on whether extraction improves clarity
+CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:14Z] AR-007 | DEFERRED | Design decision about code organization. The run() function does handle many concerns (CLI parsing, session management, AI chunking, app lifecycle), but centralizing orchestration in a 70-line function may be intentional for a small TUI. Breaking it up could fragment the startup flow. Revisit when adding more entry points or startup modes.
+CODE: fn run() -> Result<()> {
+    let args = Args::parse_args();
+    let session = match load_session(...) { ... };
+    let mut app = App::new(session);
+    // ... chunking, state setup, run loop, save
+}
+RULE: Need project convention on whether main orchestration functions should be split by responsibility (load_or_create_session, run_with_session) or kept unified for readability. For small CLIs, centralized orchestration may be preferred.
+CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:15Z] SFH-010 | DEFERRED | P1 but requires architectural changes (async/threads) for proper Ctrl+C handling during synchronous AI calls. The ctrlc crate handler alone is insufficient without restructuring blocking operations.
+CODE: match self.ai_client.chunk_diff(&self.state.session.diff_text) { ... }
+RULE: Need project decision on async architecture - if adopting tokio, FIX with cancellation tokens; if staying sync, document limitation and DEFER until user complaints justify complexity
+CAVEAT_QUALITY: accurate | sfh-reviewer
+[2026-02-05T02:34:16Z] TA-009 | DEFERRED | Main run() function involves session management, AI calls, terminal setup. Testing requires integration test infrastructure. E2E tests exist but don't exercise run() directly. Need human guidance on test strategy.
+CODE: fn run() -> Result<()> { let args = Args::parse_args(); ... }
+RULE: When main entry point functions require integration test infrastructure, DEFER for human decision on test scope vs refactoring for testability
+CAVEAT_QUALITY: missing | test-auditor
+[2026-02-05T02:34:16Z] RD-006 | DEFERRED | P2 reuse issue but caveat about Rust idioms is accurate. Generic result types or macros add complexity. Human judgment needed on whether the abstraction serves this codebase size.
+CODE: pub enum ChunkingResult { Success(Vec<Section>), Error(ChunkingError) }
+pub enum AssessmentResult { Success(Assessment), Error(AssessmentError) }
+RULE: When flagging similar enum patterns in Rust, note that generic Result<T,E> or macro-based approaches may not be idiomatic for small codebases. Defer if caveat mentions Rust type system limitations.
+CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:34:17Z] CS-006 | DEFERRED | P2 complexity issue with valid caveat. Typical section counts are small (5-20). Structural refactor needs human judgment on caching trade-offs.
+CODE: fn get_sections_needing_review() { sections.iter().filter(...).collect() }
+RULE: When multiple methods iterate the same small collection, need project guidance on whether caching complexity is justified for typical data sizes
+CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:19Z] TA-010 | DEFERRED | Terminal setup/restore error paths are difficult to test without mocking crossterm. The issue acknowledges this. Need human judgment on whether doc tests or other approaches are worth the effort.
+CODE: fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> { enable_raw_mode()...
+RULE: When testing terminal/system setup functions requires mocking external crates with no test support, DEFER for human decision on test ROI
+CAVEAT_QUALITY: missing | test-auditor
+[2026-02-05T02:34:19Z] CS-007 | DEFERRED | P2 code smell with valid caveat. Explicit per-call error messages provide better debugging context than generic helper.
+CODE: .map_err(|e| AppError::Git(format!("Failed to run git: {}", e)))?
+RULE: When error mapping pattern repeats but each instance has unique context message, defer to human on whether DRY or explicit context is preferred
+CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:20Z] AR-008 | DEFERRED | Architectural decision about where selection state lives. UiState has selected_index/scroll_offset, but TriageScreen has list_state and DeepReviewScreen has current_review_index. The split exists because ratatui's ListState is widget-specific. Needs human decision on whether to centralize all state in UiState (screens become pure views) or let screens own their state (current hybrid).
+CODE: pub struct UiState { pub selected_index: usize, pub scroll_offset: usize, ... }
+pub struct TriageScreen { list_state: ListState }
+pub struct DeepReviewScreen { current_review_index: usize }
+RULE: Need project convention on whether screen state should be centralized (all in UiState, screens are stateless renderers) or distributed (each screen owns its state). The choice affects testability and state synchronization complexity.
+CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:20Z] SEC-001 | DEFERRED | P1 security issue but requires human judgment on threat model. Attacker needs write access to repo. Sanitization could break legitimate diffs. Need guidance on: 1) Is this a realistic threat? 2) What sanitization is safe for diff content?
+CODE: format!(r#"...Here is the diff to analyze:\n\n{}"#, diff)
+RULE: When flagging prompt injection in tools processing untrusted code/diffs, assess: 1) who controls the input (repo access required?), 2) whether sanitization would break legitimate content, 3) document threat model assumptions before auto-fixing
+CAVEAT_QUALITY: accurate | security-reviewer
+[2026-02-05T02:34:22Z] PERF-001 | DEFERRED | P0 blocking issue but fix requires async/threading architecture. Caveat notes acceptable for demos. Needs human decision on architecture investment priority.
+CODE: match self.ai_client.chunk_diff(&self.state.session.diff_text) { ... }
+RULE: For blocking I/O in event loops, need project decision on async architecture investment vs demo/MVP scope before fixing
+CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:24Z] PERF-002 | DEFERRED | P2 complexity issue overlapping with CS-006. Caveat accurate for typical 5-20 section reviews. Caching adds complexity for marginal gain.
+CODE: fn get_sections_needing_review() -> Vec<(usize, &Section)> { ... }
+RULE: When O(n) iterations occur on small n (under 100) and happen at UI frame rate, defer unless profiling shows actual impact
+CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:09Z] CR-001 | CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:09Z] CR-003 | CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:09Z] CA-008 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:34:09Z] CA-009 | CAVEAT_QUALITY: correct-none | comment-auditor
+[2026-02-05T02:33:56Z] TA-014 | CAVEAT_QUALITY: correct-none | test-analysis
+[2026-02-05T02:33:56Z] WD-001 | CAVEAT_QUALITY: misleading | wiring-detector
+[2026-02-05T02:34:28Z] PERF-003 | DEFERRED | P1 resource issue but caveat accurate - only runs on quit, not hot path. Incremental/streaming saves are complex. Needs human priority decision.
+CODE: let content = serde_json::to_string_pretty(session)?;
+RULE: For serialization that only occurs at shutdown, defer unless session data is expected to exceed 10MB in normal usage
+CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:30Z] PERF-005 | DEFERRED | P1 memory issue but caveat correctly identifies it is required for re-chunking feature. Architectural decision needed on feature vs memory trade-off.
+CODE: pub diff_text: String,
+RULE: When unbounded data storage is intentional for feature requirements, need human decision on feature value vs resource constraints
+CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:33Z] PERF-006 | DEFERRED | P2 resource issue but caveat accurate - ratatui is designed for immediate-mode rendering. Caching styled lines adds complexity for micro-optimization.
+CODE: let code_lines: Vec<Line> = code.lines().map(|line| { ... Line::styled(line, style) }).collect();
+RULE: For immediate-mode UI frameworks (ratatui/imgui style), per-frame allocations are idiomatic unless profiling shows actual bottleneck
+CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:18Z] SEC-003 | CAVEAT_QUALITY: accurate | security-checker
+[2026-02-05T02:34:18Z] SEC-004 | CAVEAT_QUALITY: accurate | security-checker
+[2026-02-05T02:34:18Z] SFH-001 | CAVEAT_QUALITY: accurate | silent-failure-hunter
+[2026-02-05T02:34:18Z] SFH-002 | CAVEAT_QUALITY: correct-none | silent-failure-hunter
+[2026-02-05T02:34:18Z] SFH-004 | CAVEAT_QUALITY: accurate | silent-failure-hunter
+[2026-02-05T02:34:18Z] SFH-005 | CAVEAT_QUALITY: accurate | silent-failure-hunter
+[2026-02-05T02:34:36Z] PERF-004 | CAVEAT_QUALITY: accurate | performance-analyzer
+[2026-02-05T02:34:05Z] TA-005 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:05Z] TA-006 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:05Z] TA-007 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:05Z] TA-011 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:05Z] TA-012 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:05Z] TA-013 | CAVEAT_QUALITY: correct-none | test-auditor
+[2026-02-05T02:34:23Z] AR-001 | CAVEAT_QUALITY: correct-none | architecture-reviewer
+[2026-02-05T02:34:23Z] AR-002 | CAVEAT_QUALITY: accurate | architecture-reviewer
+[2026-02-05T02:34:23Z] AR-004 | CAVEAT_QUALITY: correct-none | architecture-reviewer
+[2026-02-05T02:34:23Z] AR-005 | CAVEAT_QUALITY: correct-none | architecture-reviewer
+[2026-02-05T02:34:02Z] CR-006 | CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:02Z] CR-007 | CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:02Z] CR-008 | CAVEAT_QUALITY: accurate | correctness-reviewer
+[2026-02-05T02:34:02Z] CR-009 | CAVEAT_QUALITY: misleading | correctness-reviewer
+[2026-02-05T02:34:02Z] CS-001 | CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:02Z] CS-002 | CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:02Z] CS-003 | CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:02Z] CS-004 | CAVEAT_QUALITY: accurate | complexity-scanner
+[2026-02-05T02:34:35Z] SFH-006 | CAVEAT_QUALITY: accurate | sfh-reviewer
+[2026-02-05T02:34:35Z] SFH-007 | CAVEAT_QUALITY: accurate | sfh-reviewer
+[2026-02-05T02:34:35Z] SFH-008 | CAVEAT_QUALITY: correct-none | sfh-reviewer
+[2026-02-05T02:34:35Z] SFH-009 | CAVEAT_QUALITY: misleading | sfh-reviewer
+[2026-02-05T02:34:35Z] TA-001 | CAVEAT_QUALITY: correct-none | ta-reviewer
+[2026-02-05T02:34:35Z] TA-002 | CAVEAT_QUALITY: correct-none | ta-reviewer
+[2026-02-05T02:34:35Z] TA-003 | CAVEAT_QUALITY: correct-none | ta-reviewer
+[2026-02-05T02:34:35Z] TA-004 | CAVEAT_QUALITY: correct-none | ta-reviewer
+[2026-02-05T02:34:23Z] RD-001 | CAVEAT_QUALITY: misleading | reuse-detector
+[2026-02-05T02:34:23Z] RD-002 | CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:34:23Z] RD-003 | CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:34:23Z] RD-004 | CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:34:23Z] RD-007 | CAVEAT_QUALITY: accurate | reuse-detector
+[2026-02-05T02:35:36Z] STREAMS | 10 streams from 50 issues
+Stream-1: AR-001,AR-005,RD-001,RD-007,TA-012 (conflict: triage.rs,deep_review.rs,pseudocode.rs)
+Stream-2: AR-002,RD-002,RD-004,TA-003,TA-004 (conflict: loading.rs,screens)
+Stream-3: CS-002,RD-003,CR-003 (conflict: screens)
+Stream-4: CR-006,CR-007,CR-009,CS-004,SFH-004 (conflict: pseudocode.rs,app.rs,state.rs)
+Stream-5: AR-004,CA-005,CA-007,CR-001,CS-001,SFH-002,SFH-009,TA-006,TA-014 (conflict: claude.rs)
+Stream-6: CA-001,CA-009,SFH-001,SFH-005,SFH-007 (conflict: main.rs)
+Stream-7: CA-003,PERF-004,SFH-006 (conflict: app.rs)
+Stream-8: SEC-004,SFH-008,TA-001,TA-002,TA-005 (conflict: git.rs)
+Stream-9: CA-002,CA-008,CR-008 (conflict: summary.rs)
+Stream-10: CA-004,CA-006,SEC-003,TA-007,CS-003,TA-011,TA-013,WD-001 (independent/low-conflict)
+[2026-02-05T02:36:07Z] CA-002 | FIXED | Removed aspirational TODO comment about markdown export since export_markdown function is implemented
+CODE: // SummaryScreen: confidence breakdown, accuracy breakdown, misconceptions list
+[2026-02-05T02:36:10Z] SEC-004 | FIXED | Added upper bound validation (1..1000) on commit count parameter
+CODE: #[arg(value_parser = clap::value_parser!(usize).range(1..1000))]
+[2026-02-05T02:36:13Z] CA-001 | FIXED | Removed stale @task comment - session save on quit and corrupted JSON detection are already implemented
+CODE: // Removed: @task(P1-T7) Implement session save on quit/Ctrl+C...
+[2026-02-05T02:36:15Z] CA-004 | FIXED | Removed outdated comment about types not being fully used and removed unnecessary dead_code allow attribute
+CODE: // Result types for AI operations (chunking and assessment) used throughout the application.
+[2026-02-05T02:36:17Z] CA-008 | FIXED | Added explanatory comment for accuracy percentage color thresholds
+CODE: // Color thresholds: green (>=80% excellent), yellow (>=50% needs work), red (<50% significant gaps)
+[2026-02-05T02:36:20Z] SFH-008 | FIXED | Included git stderr in error message for better debugging
+CODE: let stderr = String::from_utf8_lossy(&output.stderr); return Err(AppError::Git(format!("Failed to get current branch: {}", stderr.trim())));
+[2026-02-05T02:36:22Z] CA-009 | FIXED | Removed empty test module with obvious comment about tests directory
+CODE: // Removed: #[cfg(test)] mod tests { // Integration tests are in tests/ }
+[2026-02-05T02:36:28Z] CR-008 | FIXED | Changed integer division to floating point with rounding for accurate percentage
+CODE: ((counts.confirmed as f64 / counts.total() as f64) * 100.0).round() as usize
+[2026-02-05T02:36:29Z] TA-001 | FIXED | Replaced tautological test with meaningful assertions checking branch is main or master
+CODE: assert!(result.is_ok()); assert!(branch == "main" || branch == "master");
+[2026-02-05T02:36:29Z] AR-004 | FIXED | Extracted common extract_json(text, open, close) helper function
+CODE: fn extract_json(text: &str, open: char, close: char) -> Option<String>
+[2026-02-05T02:36:32Z] CA-006 | FIXED | Added doc comment explaining why hashing is used for session filenames
+CODE: /// Hash the identifier to create a safe filename. This handles special characters like ':' in identifiers...
+[2026-02-05T02:36:33Z] CS-001 | FIXED | Extracted common extract_json(text, open, close) helper function
+CODE: fn extract_json_array(text: &str) -> Option<String> { extract_json(text, '[', ']') }
+[2026-02-05T02:36:36Z] CS-002 | FIXED | Extracted diff syntax highlighting into shared highlight_diff_lines() helper in screens/mod.rs and updated triage.rs, deep_review.rs, and pseudocode.rs to use it
+CODE: pub fn highlight_diff_lines(code: &str) -> Vec<Line> { code.lines().map(|line| { ... }).collect() }
+[2026-02-05T02:36:40Z] TA-002 | FIXED | Replaced tautological test with meaningful test that verifies read_diff_commits(1) succeeds
+CODE: let result = read_diff_commits(1); assert!(result.is_ok());
+[2026-02-05T02:36:41Z] CR-006 | FIXED | Fixed selected_index ordering: now set after goto() since goto() resets UiState
+CODE: state.goto(Screen::PseudocodeReview);\nstate.ui.selected_index = section_idx;
+[2026-02-05T02:36:43Z] CA-005 | FIXED | Removed outdated phase references from module header
+CODE: // This module provides the real AI client that shells out to the Claude CLI.
+[2026-02-05T02:36:47Z] SFH-001 | FIXED | Show warning for real session deletion errors (not found is already handled gracefully)
+CODE: if let Err(e) = delete_session(&identifier) { eprintln!("Warning: ..."); }
+[2026-02-05T02:36:49Z] CA-007 | FIXED | Added doc comment explaining why multiple JSON formats are supported
+CODE: /// Claude responses may include JSON in markdown code blocks, plain code blocks, or as raw text.
+[2026-02-05T02:36:49Z] AR-001 | FIXED | Extracted diff syntax highlighting to shared highlight_diff_lines function in screens/mod.rs, updated all three screens to use it
+CODE: let code_lines: Vec<Line> = highlight_diff_lines(code);
+[2026-02-05T02:36:50Z] TA-005 | FIXED | Replaced weak assertion with explicit success check and branch name validation
+CODE: assert!(result.is_ok()); assert!(!branch.is_empty()); assert!(branch.chars().all(|c| c.is_alphanumeric() || ...));
+[2026-02-05T02:36:51Z] CA-003 | FIXED | Removed misleading PHASE references from dead_code allows across app.rs, error.rs, session.rs, state.rs, section.rs, and ai/mod.rs
+CODE: pub fn state(&self) -> &AppState { // removed #[allow(dead_code)] and PHASE comment
+[2026-02-05T02:36:54Z] CR-007 | FIXED | Restored draft_hypothesis to ui.input_text when entering PseudocodeReview screen
+CODE: if matches!(screen, Screen::PseudocodeReview) {\n    if let Some(draft) = &self.session.draft_hypothesis {\n        self.ui.input_text = draft.clone();\n    }\n}
+[2026-02-05T02:36:58Z] SEC-003 | FIXED | Added restrictive Unix permissions (0700) on session directory after creation
+CODE: #[cfg(unix)] fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))...
+[2026-02-05T02:37:04Z] CR-001 | FIXED | Fixed UTF-8 panic by finding valid char boundary before truncating
+CODE: while boundary > 0 && !s.is_char_boundary(boundary) { boundary -= 1; }
+[2026-02-05T02:37:05Z] PERF-004 | FIXED | Moved empty hypothesis check before string cloning in retry_assessment
+CODE: if self.state.ui.input_text.is_empty() { return; } // check before cloning
+[2026-02-05T02:37:15Z] SFH-005 | FIXED | Replace process::exit with error return for clean exit through normal flow with proper cleanup
+CODE: Err(AppError::Git("No changes to review".to_string())) // handled in main() for clean exit
+[2026-02-05T02:37:16Z] CR-009 | FIXED | Reset PseudocodeState to Input when entering screen fresh (no error, no assessment, not pending retry)
+CODE: if matches!(self.state, PseudocodeState::Submitted)\n    && state.ui.error.is_none()\n    && !has_assessment\n    && !state.ui.needs_assessment_retry\n{\n    self.state = PseudocodeState::Input;\n}
+[2026-02-05T02:37:19Z] SFH-006 | FIXED | Fixed terminal restore to not mask original error and warn on restore failure
+CODE: if let Err(restore_err) = restore_terminal(&mut terminal) { eprintln!("Warning: ..."); if result.is_ok() { return Err(restore_err); } }
+[2026-02-05T02:37:19Z] AR-002 | FIXED | Extracted shared render_error_panel helper in mod.rs, updated loading.rs, triage.rs, deep_review.rs to use it
+CODE: pub fn render_error_panel(frame, area, title, error, hints) { ... }
+[2026-02-05T02:37:26Z] RD-002 | FIXED | Same fix as AR-002: extracted render_error_panel helper in mod.rs, updated loading.rs, triage.rs, deep_review.rs
+CODE: render_error_panel(frame, area, title, error, hints)
+[2026-02-05T02:37:28Z] SFH-007 | FIXED | Make session save failure prominent with visual separator and require Enter to acknowledge data loss
+CODE: eprintln!("WARNING: Failed to save session..."); eprintln!("Press Enter to acknowledge...");
+[2026-02-05T02:37:35Z] TA-007 | FIXED | Added tests for truncated JSON, wrong schema, and identifier mismatch corruption scenarios
+CODE: test_truncated_json_detection, test_valid_json_wrong_schema, test_identifier_mismatch_detection
+[2026-02-05T02:37:36Z] SFH-002 | FIXED | Added 2-minute timeout using wait-timeout crate
+CODE: let status = child.wait_timeout(Duration::from_secs(120))
+[2026-02-05T02:37:41Z] SFH-009 | FIXED | Fixed UTF-8 panic by finding valid char boundary before truncating
+CODE: while boundary > 0 && !s.is_char_boundary(boundary) { boundary -= 1; }
+[2026-02-05T02:37:46Z] CS-004 | FIXED | Replaced is_some + unwrap pattern with if-let chains in render() and handle_input()
+CODE: if let Some(section) = state.current_section() {\n    if section.assessment.is_some() {\n        // handle...\n    }\n}
+[2026-02-05T02:37:47Z] CS-003 | FIXED | Replaced is_some + unwrap anti-pattern with idiomatic if-let
+CODE: if let Some(assessment) = &section.assessment { ... }
+[2026-02-05T02:37:47Z] AR-005 | FIXED | Extracted scroll handling to shared handle_scroll_input function in screens/mod.rs, updated triage.rs and deep_review.rs to use it
+CODE: if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset)
+[2026-02-05T02:37:52Z] SFH-004 | FIXED | Fixed same issue as CS-004 - replaced fragile is_some + unwrap with if-let chains
+CODE: if let Some(section) = state.current_section() {\n    if section.assessment.is_some() { ... }\n}
+[2026-02-05T02:37:59Z] RD-001 | FIXED | Diff highlighting consolidated into highlight_diff_lines in screens/mod.rs, all three screens now use the shared function
+CODE: let code_lines: Vec<Line> = highlight_diff_lines(code);
+[2026-02-05T02:38:06Z] RD-003 | FIXED | Created shared render_footer_hints() helper in screens/mod.rs and updated triage.rs, deep_review.rs, pseudocode.rs, and summary.rs to use it
+CODE: pub fn render_footer_hints(frame: &mut Frame, area: Rect, hints: &str) { ... }
+[2026-02-05T02:38:08Z] RD-007 | FIXED | Scroll handling consolidated into handle_scroll_input in screens/mod.rs, used by triage.rs and deep_review.rs
+CODE: if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset)
+[2026-02-05T02:38:13Z] TA-011 | FIXED | Added tests for empty sections boundary case verifying tag_counts, hypothesis_counts, sections_needing_review, all_tagged, and deep_review_complete
+CODE: test_empty_sections_tag_counts, test_empty_sections_hypothesis_counts, test_empty_sections_needing_review...
+[2026-02-05T02:38:18Z] TA-006 | FIXED | Added edge case tests for malformed JSON, unicode, empty arrays, and explanation text
+CODE: test_parse_sections_malformed_json_returns_error, test_parse_sections_with_unicode_in_title, ...
+[2026-02-05T02:38:39Z] TA-013 | FIXED | Added tests verifying that concurrent calls are rejected but subsequent calls succeed after completion
+CODE: test_concurrent_rejection_then_success_after_completion, test_assess_concurrent_rejection_then_success_after_completion
+[2026-02-05T02:38:40Z] CR-003 | FIXED | Replaced .unwrap() with if-let pattern matching to safely handle section retrieval in DeepReviewScreen Enter handler
+CODE: if let Some(&(section_idx, _)) = needs_review.get(clamped_index) { ... }
+[2026-02-05T02:38:42Z] TA-014 | FIXED | Added tests for escaped backslashes, nested quotes, and newlines in JSON
+CODE: test_extract_json_with_escaped_backslashes, test_extract_json_with_nested_quotes_in_code, ...
+[2026-02-05T02:38:48Z] TA-012 | FIXED | Added test_triage_screen_single_section_navigation test verifying wrap-around stays at index 0 with single section
+CODE: screen.select_next(&state); assert_eq!(screen.list_state.selected(), Some(0));
+[2026-02-05T02:38:50Z] WD-001 | FIXED | Removed unused anyhow dependency from Cargo.toml
+CODE: Removed: anyhow = "1"
+[2026-02-05T02:39:01Z] RD-004 | FIXED | Created handle_error_state_input helper and ErrorInputResult enum in mod.rs, updated triage.rs, deep_review.rs, pseudocode.rs, loading.rs
+CODE: pub fn handle_error_state_input(key) -> ErrorInputResult { Quit | Retry | NotHandled }
+[2026-02-05T02:39:33Z] TA-003 | FIXED | Replaced no-op assert!(true) with meaningful assertion checking throbber_state.index() == 0
+CODE: assert_eq!(screen.throbber_state.index(), 0)
+[2026-02-05T02:39:42Z] TA-004 | FIXED | Replaced no-op assert!(true) with assertion verifying tick() advances the throbber animation state index
+CODE: assert_ne!(screen.throbber_state.index(), initial_index)

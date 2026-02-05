@@ -1,4 +1,3 @@
-// @task(P1-T4) Session data model for persistence
 use serde::{Deserialize, Serialize};
 
 use super::section::Section;
@@ -64,8 +63,7 @@ impl Session {
     pub fn hypothesis_counts(&self) -> HypothesisCounts {
         let mut counts = HypothesisCounts::default();
         for section in &self.sections {
-            if section.assessment.is_some() {
-                let assessment = section.assessment.as_ref().unwrap();
+            if let Some(assessment) = &section.assessment {
                 if assessment.diverges.is_empty() && assessment.missed.is_empty() {
                     counts.confirmed += 1;
                 } else {
@@ -82,7 +80,7 @@ impl Session {
     }
 
     /// Get all unreviewed sections that need review
-    #[allow(dead_code)] // Used in PHASE-3 (DeepReviewScreen)
+    #[allow(dead_code)] // Reserved for future navigation feature
     pub fn sections_needing_deep_review(&self) -> Vec<&Section> {
         self.sections
             .iter()
@@ -103,6 +101,7 @@ impl Session {
     }
 
     /// Check if all deep reviews are complete
+    #[allow(dead_code)] // Reserved for future screen transition gating
     pub fn deep_review_complete(&self) -> bool {
         self.sections
             .iter()
@@ -136,7 +135,7 @@ pub struct HypothesisCounts {
 }
 
 impl HypothesisCounts {
-    #[allow(dead_code)] // Used in PHASE-3 (SummaryScreen)
+    /// Total number of hypotheses submitted
     pub fn total(&self) -> usize {
         self.confirmed + self.corrected
     }
@@ -211,5 +210,44 @@ mod tests {
         let json = serde_json::to_string(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.identifier, session.identifier);
+    }
+
+    #[test]
+    fn test_empty_sections_tag_counts() {
+        let session = Session::new("test".to_string(), "".to_string());
+        let counts = session.tag_counts();
+        assert_eq!(counts.total(), 0);
+        assert_eq!(counts.tagged(), 0);
+        assert_eq!(counts.untagged, 0);
+    }
+
+    #[test]
+    fn test_empty_sections_hypothesis_counts() {
+        let session = Session::new("test".to_string(), "".to_string());
+        let counts = session.hypothesis_counts();
+        assert_eq!(counts.total(), 0);
+        assert_eq!(counts.confirmed, 0);
+        assert_eq!(counts.corrected, 0);
+    }
+
+    #[test]
+    fn test_empty_sections_needing_review() {
+        let session = Session::new("test".to_string(), "".to_string());
+        let needing_review = session.sections_needing_review();
+        assert!(needing_review.is_empty());
+    }
+
+    #[test]
+    fn test_empty_sections_all_tagged() {
+        let session = Session::new("test".to_string(), "".to_string());
+        // Empty sections should be considered "all tagged" (vacuously true)
+        assert!(session.all_tagged());
+    }
+
+    #[test]
+    fn test_empty_sections_deep_review_complete() {
+        let session = Session::new("test".to_string(), "".to_string());
+        // Empty sections should be considered complete (vacuously true)
+        assert!(session.deep_review_complete());
     }
 }

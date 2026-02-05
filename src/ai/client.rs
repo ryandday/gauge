@@ -1,5 +1,3 @@
-// @task(P1-T4a) AiClient trait defining the AI interface for PHASE-2/3 parallel work
-//
 // Note: assess_hypothesis and is_busy methods are defined here for PHASE-2/3 parallel work
 // but not used until those phases are implemented.
 #![allow(dead_code)]
@@ -8,9 +6,8 @@ use super::types::{AssessmentResult, ChunkingResult};
 
 /// Trait defining the AI client interface for code review operations.
 ///
-/// This trait enables parallel development:
-/// - PHASE-2 implements the real Claude subprocess client
-/// - PHASE-3 uses a mock implementation for UI testing
+/// ClaudeClient provides the real implementation via Claude CLI subprocess.
+/// MockAiClient is used for testing.
 pub trait AiClient {
     /// Chunk a git diff into logical sections ordered by importance.
     ///
@@ -161,16 +158,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_client_assess_hypothesis() {
-        let mut client = MockAiClient::new();
-        let result = client.assess_hypothesis("code", "hypothesis");
-        assert!(result.is_success());
-
-        let assessment = result.assessment().unwrap();
-        assert!(!assessment.correct.is_empty());
-    }
-
-    #[test]
     fn test_mock_client_is_busy() {
         let client = MockAiClient::new();
         assert!(!client.is_busy());
@@ -192,5 +179,51 @@ mod tests {
 
         let result = client.assess_hypothesis("code", "hypothesis");
         assert!(!result.is_success());
+    }
+
+    #[test]
+    fn test_concurrent_rejection_then_success_after_completion() {
+        let mut client = MockAiClient::new();
+
+        // Call 1 starts (simulated by setting busy)
+        client.set_busy(true);
+        assert!(client.is_busy());
+
+        // Call 2 is rejected while call 1 is in progress
+        let result2 = client.chunk_diff("second diff");
+        assert!(!result2.is_success());
+
+        // Call 1 completes (simulated by clearing busy)
+        client.set_busy(false);
+        assert!(!client.is_busy());
+
+        // Call 3 succeeds after call 1 completes
+        let result3 = client.chunk_diff("third diff");
+        assert!(result3.is_success());
+        let sections = result3.sections().unwrap();
+        assert_eq!(sections.len(), 3);
+    }
+
+    #[test]
+    fn test_assess_concurrent_rejection_then_success_after_completion() {
+        let mut client = MockAiClient::new();
+
+        // Call 1 starts (simulated by setting busy)
+        client.set_busy(true);
+        assert!(client.is_busy());
+
+        // Call 2 is rejected while call 1 is in progress
+        let result2 = client.assess_hypothesis("code", "hypothesis");
+        assert!(!result2.is_success());
+
+        // Call 1 completes (simulated by clearing busy)
+        client.set_busy(false);
+        assert!(!client.is_busy());
+
+        // Call 3 succeeds after call 1 completes
+        let result3 = client.assess_hypothesis("code", "hypothesis");
+        assert!(result3.is_success());
+        let assessment = result3.assessment().unwrap();
+        assert!(!assessment.correct.is_empty());
     }
 }

@@ -1,4 +1,3 @@
-// @task(P1-T6) Create app shell: terminal setup, main event loop, screen routing
 use std::io::{self, Stdout};
 use std::time::Duration;
 
@@ -52,8 +51,8 @@ impl App {
         &mut self.state.session
     }
 
-    /// Get a reference to the app state
-    #[allow(dead_code)] // Used in PHASE-3/4 testing
+    /// Get a reference to the app state (used in tests)
+    #[allow(dead_code)]
     pub fn state(&self) -> &AppState {
         &self.state
     }
@@ -69,8 +68,16 @@ impl App {
 
         let result = self.main_loop(&mut terminal);
 
-        // Ensure terminal is restored even on error
-        restore_terminal(&mut terminal)?;
+        // Always attempt restore, but don't let restore failure mask main_loop error
+        if let Err(restore_err) = restore_terminal(&mut terminal) {
+            eprintln!("CRITICAL: Failed to restore terminal: {}", restore_err);
+            eprintln!("Your terminal may be in a broken state. Run 'reset' to fix.");
+            // If main_loop succeeded but restore failed, return the restore error
+            // If main_loop failed, return that original error (user has been warned about terminal)
+            if result.is_ok() {
+                return Err(restore_err);
+            }
+        }
 
         result
     }
@@ -80,10 +87,15 @@ impl App {
             // Handle retry requests before rendering
             self.handle_retries();
 
+            // Tick animations for loading screen
+            if matches!(self.state.screen, Screen::Loading) {
+                self.loading_screen.tick();
+            }
+
             // Render current screen
             terminal.draw(|frame| self.render(frame))?;
 
-            // Poll for events with timeout (allows 4+ FPS for smooth UI)
+            // Poll for events with timeout (allows ~4 FPS updates for responsive UI)
             if event::poll(Duration::from_millis(250))? {
                 if let Event::Key(key) = event::read()? {
                     // Handle global quit (Ctrl+C)
@@ -142,29 +154,30 @@ impl App {
 
     /// Retry assessing the current hypothesis with AI
     fn retry_assessment(&mut self) {
+        // Early return checks before any cloning
+        if self.state.ui.input_text.is_empty() {
+            return;
+        }
+
         let selected_idx = self.state.ui.selected_index;
         let (code, hypothesis) = {
             if let Some(section) = self.state.session.sections.get(selected_idx) {
-                let code = section.code.clone();
-                let hypothesis = self.state.ui.input_text.clone();
-                (code, hypothesis)
+                (section.code.clone(), self.state.ui.input_text.clone())
             } else {
                 return;
             }
         };
 
-        if hypothesis.is_empty() {
-            return;
-        }
-
         match self.ai_client.assess_hypothesis(&code, &hypothesis) {
             AssessmentResult::Success(assessment) => {
+                // Only clear draft if it matches the submitted hypothesis (user may have started a new draft)
+                if self.state.session.draft_hypothesis.as_ref() == Some(&hypothesis) {
+                    self.state.session.draft_hypothesis = None;
+                }
                 if let Some(section) = self.state.session.sections.get_mut(selected_idx) {
                     section.hypothesis = Some(hypothesis);
                     section.assessment = Some(assessment);
                 }
-                // Clear draft hypothesis since it's been submitted
-                self.state.session.draft_hypothesis = None;
                 self.state.ui.input_text.clear();
                 self.state.ui.cursor_position = 0;
             }

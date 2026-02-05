@@ -1,8 +1,10 @@
-// @task(P1-T5) Session persistence implementation
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use crate::error::{AppError, Result};
 use crate::models::Session;
@@ -16,7 +18,14 @@ pub fn sessions_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Generate a hash for the session identifier
+/// Hash the identifier to create a safe filename.
+///
+/// This handles special characters like ':' in identifiers (e.g., "commits:5")
+/// that aren't allowed in filenames on some systems (Windows).
+///
+/// Uses hashing rather than character escaping to ensure uniform filename length
+/// and avoid edge cases with very long identifiers. Trade-off: filenames are not
+/// human-readable, but collision risk is negligible for typical usage patterns.
 fn hash_identifier(identifier: &str) -> String {
     let mut hasher = DefaultHasher::new();
     identifier.hash(&mut hasher);
@@ -83,9 +92,14 @@ pub fn load_session(identifier: &str) -> Result<SessionLoadResult> {
 pub fn save_session(session: &Session) -> Result<PathBuf> {
     let dir = sessions_dir()?;
 
-    // Ensure directory exists
+    // Ensure directory exists with restrictive permissions (0700)
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::Session(format!("Failed to create sessions directory: {}", e)))?;
+
+    // Set restrictive permissions on the sessions directory (owner-only access)
+    #[cfg(unix)]
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+        .map_err(|e| AppError::Session(format!("Failed to set directory permissions: {}", e)))?;
 
     let path = session_path(&session.identifier)?;
     let tmp_path = path.with_extension("tmp");
@@ -186,6 +200,84 @@ mod tests {
                 assert!(error.contains("Invalid JSON"));
             }
             _ => panic!("Expected Corrupted result"),
+        }
+
+        // Cleanup
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_truncated_json_detection() {
+        let identifier = format!("truncated:{}", std::process::id());
+        let path = session_path(&identifier).unwrap();
+
+        // Create parent directory
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        // Write truncated JSON (simulating partial write)
+        fs::write(&path, r#"{"version":1,"identifier":"truncated","diff_text":""#).unwrap();
+
+        let result = load_session(&identifier).unwrap();
+        match result {
+            SessionLoadResult::Corrupted { error, .. } => {
+                assert!(error.contains("Invalid JSON"));
+            }
+            _ => panic!("Expected Corrupted result for truncated JSON"),
+        }
+
+        // Cleanup
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_valid_json_wrong_schema() {
+        let identifier = format!("wrongschema:{}", std::process::id());
+        let path = session_path(&identifier).unwrap();
+
+        // Create parent directory
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        // Write valid JSON but wrong schema (missing required fields)
+        fs::write(&path, r#"{"foo": "bar", "baz": 123}"#).unwrap();
+
+        let result = load_session(&identifier).unwrap();
+        match result {
+            SessionLoadResult::Corrupted { error, .. } => {
+                assert!(error.contains("Invalid JSON"));
+            }
+            _ => panic!("Expected Corrupted result for wrong schema"),
+        }
+
+        // Cleanup
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_identifier_mismatch_detection() {
+        let identifier = format!("mismatch:{}", std::process::id());
+        let wrong_identifier = format!("wrong:{}", std::process::id());
+        let path = session_path(&identifier).unwrap();
+
+        // Create parent directory
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        // Create a valid session with mismatched identifier
+        let session = Session::new(wrong_identifier, "test diff".to_string());
+        let content = serde_json::to_string(&session).unwrap();
+        fs::write(&path, content).unwrap();
+
+        let result = load_session(&identifier).unwrap();
+        match result {
+            SessionLoadResult::Corrupted { error, .. } => {
+                assert!(error.contains("mismatch"));
+            }
+            _ => panic!("Expected Corrupted result for identifier mismatch"),
         }
 
         // Cleanup

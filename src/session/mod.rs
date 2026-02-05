@@ -1,4 +1,3 @@
-// @task(P1-T5) Implement session persistence: save/load to ~/.sherpa/sessions/<hash>.json
 mod persistence;
 
 #[allow(unused_imports)]

@@ -1,10 +1,9 @@
-// Implement LoadingScreen: spinner, status text, error state with retry
 use crossterm::event::KeyEvent;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders};
 use throbber_widgets_tui::{Throbber, ThrobberState, BRAILLE_SIX};
 
-use super::ScreenTrait;
+use super::{handle_error_state_input, render_error_panel, ErrorInputResult, ScreenTrait};
 use crate::error::Result;
 use crate::models::AppState;
 
@@ -20,7 +19,7 @@ impl LoadingScreen {
         }
     }
 
-    /// Advance the spinner animation (called each render frame)
+    /// Advance the spinner animation (called each render frame by App::main_loop)
     pub fn tick(&mut self) {
         self.throbber_state.calc_next();
     }
@@ -58,25 +57,13 @@ impl ScreenTrait for LoadingScreen {
         let content_area = horizontal[1];
 
         if let Some(error) = &state.ui.error {
-            // Error state: show error message with retry hints
-            let error_text = format!(
-                "Error: {}\n\n\
-                 Press 'r' to retry or 'q' to quit\n\
-                 If this persists, check your input format.",
-                error
+            render_error_panel(
+                frame,
+                content_area,
+                "Sherpa",
+                error,
+                "Press 'r' to retry or 'q' to quit\nIf this persists, check your input format.",
             );
-
-            let paragraph = Paragraph::new(error_text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Sherpa")
-                        .border_style(Style::default().fg(Color::Red)),
-                )
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Red));
-
-            frame.render_widget(paragraph, content_area);
         } else {
             // Loading state: show spinner with status text
             let throbber = Throbber::default()
@@ -108,16 +95,27 @@ impl ScreenTrait for LoadingScreen {
     }
 
     fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
-        use crossterm::event::KeyCode;
+        // Handle error state using shared helper
+        if state.ui.error.is_some() {
+            return match handle_error_state_input(&key) {
+                ErrorInputResult::Quit => {
+                    state.quit();
+                    Ok(true)
+                }
+                ErrorInputResult::Retry => {
+                    // Request retry - main loop will re-attempt chunking
+                    state.ui.request_chunking_retry();
+                    Ok(true)
+                }
+                ErrorInputResult::NotHandled => Ok(false),
+            };
+        }
 
+        // Non-error state: only quit works
+        use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Char('q') => {
                 state.quit();
-                Ok(true)
-            }
-            KeyCode::Char('r') if state.ui.error.is_some() => {
-                // Request retry - main loop will re-attempt chunking
-                state.ui.request_chunking_retry();
                 Ok(true)
             }
             _ => Ok(false),
@@ -133,16 +131,8 @@ mod tests {
     #[test]
     fn test_loading_screen_new() {
         let screen = LoadingScreen::new();
-        // Throbber state is initialized
-        assert!(true); // Basic construction test
-    }
-
-    #[test]
-    fn test_loading_screen_tick() {
-        let mut screen = LoadingScreen::new();
-        screen.tick();
-        // Should not panic
-        assert!(true);
+        // Verify throbber state is initialized with default index (0)
+        assert_eq!(screen.throbber_state.index(), 0);
     }
 
     #[test]

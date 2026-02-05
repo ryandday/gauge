@@ -1,4 +1,3 @@
-// @task(P1-T7) Implement session save on quit/Ctrl+C; detect corrupted JSON on load
 mod ai;
 mod app;
 mod cli;
@@ -13,13 +12,18 @@ use std::process::ExitCode;
 use ai::{AiClient, ChunkingResult, ClaudeClient};
 use app::App;
 use cli::Args;
-use error::Result;
+use error::{AppError, Result};
 use models::{Screen, Session};
 use session::{delete_session, load_session, save_session, SessionLoadResult};
 
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
+        Err(AppError::Git(msg)) if msg == "No changes to review" => {
+            // Clean exit for empty diff - not an error condition
+            eprintln!("No changes to review.");
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("Error: {}", e);
             ExitCode::FAILURE
@@ -34,7 +38,10 @@ fn run() -> Result<()> {
     // Handle session loading/creation
     let session = if args.new {
         // --new flag: force fresh session
-        delete_session(&identifier).ok(); // Ignore errors if no existing session
+        // delete_session returns Ok(()) for non-existent files, so any error is real
+        if let Err(e) = delete_session(&identifier) {
+            eprintln!("Warning: Could not delete old session: {}", e);
+        }
         create_new_session(&args)?
     } else {
         // Try to load existing session
@@ -70,8 +77,7 @@ fn run() -> Result<()> {
         match client.chunk_diff(&app.session().diff_text) {
             ChunkingResult::Success(sections) => {
                 if sections.is_empty() {
-                    eprintln!("AI returned no sections. The diff may be too small or unclear.");
-                    return Ok(());
+                    return Err(AppError::Ai("AI returned no sections. The diff may be too small or unclear.".to_string()));
                 }
                 app.session_mut().sections = sections;
                 app.state_mut().goto(Screen::Triage);
@@ -92,8 +98,16 @@ fn run() -> Result<()> {
     let result = app.run();
 
     // Save session on quit (whether normal or error)
+    // Make save failures very visible since user may lose progress
     if let Err(e) = save_session(app.session()) {
-        eprintln!("Warning: Failed to save session: {}", e);
+        eprintln!();
+        eprintln!("==============================================");
+        eprintln!("WARNING: Failed to save session: {}", e);
+        eprintln!("Your progress has NOT been saved!");
+        eprintln!("Session: {}", app.session().identifier);
+        eprintln!("==============================================");
+        eprintln!("Press Enter to acknowledge...");
+        let _ = std::io::stdin().read_line(&mut String::new());
     }
 
     result
@@ -106,8 +120,8 @@ fn create_new_session(args: &Args) -> Result<Session> {
     let diff_text = git::read_diff(args.commits)?;
 
     if diff_text.trim().is_empty() {
-        eprintln!("No changes to review.");
-        std::process::exit(0);
+        // Return an error instead of exiting - allows clean exit through normal flow
+        return Err(AppError::Git("No changes to review".to_string()));
     }
 
     Ok(Session::new(identifier, diff_text))
@@ -123,9 +137,4 @@ fn confirm_fresh_start() -> Result<bool> {
     io::stdin().read_line(&mut input)?;
 
     Ok(input.trim().eq_ignore_ascii_case("y"))
-}
-
-#[cfg(test)]
-mod tests {
-    // Integration tests are in the tests/ directory
 }

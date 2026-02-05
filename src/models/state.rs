@@ -1,5 +1,3 @@
-// @task(P1-T4) App state and screen routing models
-// Screen navigation and backstack behavior (goto method, stage transitions)
 use serde::{Deserialize, Serialize};
 
 use super::session::Session;
@@ -36,9 +34,24 @@ impl From<ReviewStage> for Screen {
     }
 }
 
-/// Ephemeral UI state that resets on navigation
+/// Ephemeral UI state that resets on navigation.
+///
+/// # Selection State Architecture (Hybrid Pattern)
+///
+/// This app uses a hybrid approach for selection state:
+///
+/// - **UiState** holds `selected_index` for cross-screen communication (e.g., passing
+///   the selected section index from DeepReview to PseudocodeReview via `goto()`).
+///
+/// - **Individual screens** own their own selection state (e.g., `TriageScreen.list_state`,
+///   `DeepReviewScreen.current_review_index`) because ratatui's `ListState` is widget-specific
+///   and must be passed to `render_stateful_widget()`.
+///
+/// This hybrid exists due to framework constraints: ratatui widgets require their own state
+/// objects, but we also need a shared location for screen transitions. The pattern works
+/// because screens are responsible for their own rendering and navigation logic, while
+/// UiState facilitates handoffs between screens.
 #[derive(Debug, Default)]
-#[allow(dead_code)] // Fields used in PHASE-3 screens
 pub struct UiState {
     /// Selected section index in triage/deep review
     pub selected_index: usize,
@@ -127,6 +140,14 @@ impl AppState {
         }
         // Reset ephemeral UI state on screen transition
         self.ui = UiState::default();
+
+        // Restore draft hypothesis when entering PseudocodeReview
+        if matches!(screen, Screen::PseudocodeReview) {
+            if let Some(draft) = &self.session.draft_hypothesis {
+                self.ui.input_text = draft.clone();
+                self.ui.cursor_position = self.ui.input_text.len();
+            }
+        }
     }
 
     /// Request app quit
@@ -140,7 +161,7 @@ impl AppState {
     }
 
     /// Get the current section mutably
-    #[allow(dead_code)] // Used in PHASE-3 for tagging
+    #[allow(dead_code)] // Reserved for future direct section mutation
     pub fn current_section_mut(&mut self) -> Option<&mut super::Section> {
         self.session.sections.get_mut(self.ui.selected_index)
     }

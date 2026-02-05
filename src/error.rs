@@ -1,4 +1,5 @@
-// Error types for the application
+//! Error types and Result alias for unified error handling across the sherpa application.
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -13,7 +14,7 @@ pub enum AppError {
     Session(String),
 
     #[error("AI error: {0}")]
-    #[allow(dead_code)] // Used in PHASE-2
+    #[allow(dead_code)] // Reserved for future AI error handling
     Ai(String),
 
     #[error("IO error: {0}")]

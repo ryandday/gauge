@@ -1,4 +1,5 @@
-// Library crate for testing and reuse
+//! Library crate exposing sherpa modules for testing and potential reuse as a library.
+
 pub mod ai;
 pub mod app;
 pub mod cli;

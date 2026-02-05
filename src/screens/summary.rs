@@ -1,5 +1,3 @@
-// SummaryScreen: confidence breakdown, accuracy breakdown, misconceptions list
-// Implement markdown export to docs/sherpa-review-<date>-<time>.md
 use std::fs;
 use std::path::PathBuf;
 
@@ -8,8 +6,9 @@ use crossterm::event::KeyEvent;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
-use super::ScreenTrait;
+use super::{render_footer_hints, ScreenTrait};
 use crate::error::Result;
+use crate::git::get_repo_root;
 use crate::models::{AppState, Screen};
 
 /// Summary screen showing review statistics and export option
@@ -86,6 +85,15 @@ impl ScreenTrait for SummaryScreen {
 }
 
 impl SummaryScreen {
+    /// Calculate proportional width for bar visualization segments
+    fn proportional_width(count: usize, total: usize, bar_width: usize) -> usize {
+        if total > 0 {
+            (count * bar_width) / total
+        } else {
+            0
+        }
+    }
+
     fn render_confidence_breakdown(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         let counts = state.session.tag_counts();
 
@@ -97,21 +105,9 @@ impl SummaryScreen {
         // Create a simple bar visualization
         let total = counts.total();
         let bar_width = area.width.saturating_sub(4) as usize;
-        let got_it_width = if total > 0 {
-            (counts.got_it * bar_width) / total
-        } else {
-            0
-        };
-        let shaky_width = if total > 0 {
-            (counts.shaky * bar_width) / total
-        } else {
-            0
-        };
-        let lost_width = if total > 0 {
-            (counts.lost * bar_width) / total
-        } else {
-            0
-        };
+        let got_it_width = Self::proportional_width(counts.got_it, total, bar_width);
+        let shaky_width = Self::proportional_width(counts.shaky, total, bar_width);
+        let lost_width = Self::proportional_width(counts.lost, total, bar_width);
 
         let bar = Line::from(vec![
             Span::styled(
@@ -150,7 +146,7 @@ impl SummaryScreen {
         );
 
         let accuracy_pct = if counts.total() > 0 {
-            (counts.confirmed * 100) / counts.total()
+            ((counts.confirmed as f64 / counts.total() as f64) * 100.0).round() as usize
         } else {
             0
         };
@@ -161,6 +157,7 @@ impl SummaryScreen {
             "No hypotheses submitted".to_string()
         };
 
+        // Color thresholds: green (>=80% excellent), yellow (>=50% needs work), red (<50% significant gaps)
         let content = vec![
             Line::from(text),
             Line::from(""),
@@ -254,25 +251,29 @@ impl SummaryScreen {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let hints = "e: export to markdown | Esc: back | q: quit";
-        let footer = Paragraph::new(hints)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(footer, area);
+        render_footer_hints(frame, area, hints);
     }
 
     /// Export the review session to a markdown file
     fn export_markdown(&self, state: &AppState) -> std::result::Result<PathBuf, String> {
+        // Use repository root docs/ as default output directory
+        let repo_root = get_repo_root()
+            .map_err(|e| format!("Failed to find repository root: {}", e))?;
+        let output_dir = repo_root.join("docs");
+        self.export_markdown_to(state, output_dir)
+    }
+
+    /// Export the review session to a markdown file in the specified directory
+    fn export_markdown_to(&self, state: &AppState, output_dir: PathBuf) -> std::result::Result<PathBuf, String> {
         let now = Local::now();
         let filename = format!("sherpa-review-{}.md", now.format("%Y-%m-%d-%H%M%S"));
 
-        // Create in docs/ folder of current working directory
-        let docs_dir = PathBuf::from("docs");
-        if !docs_dir.exists() {
-            fs::create_dir_all(&docs_dir)
-                .map_err(|e| format!("Failed to create docs directory: {}", e))?;
+        if !output_dir.exists() {
+            fs::create_dir_all(&output_dir)
+                .map_err(|e| format!("Failed to create output directory: {}", e))?;
         }
 
-        let path = docs_dir.join(&filename);
+        let path = output_dir.join(&filename);
 
         let mut content = String::new();
 
@@ -419,11 +420,11 @@ mod tests {
         let screen = SummaryScreen::new();
         let state = create_test_state();
 
-        // Use temp directory for testing
+        // Use temp directory for testing - pass it directly to avoid changing global cwd
         let temp = tempdir().unwrap();
-        std::env::set_current_dir(&temp).unwrap();
+        let output_dir = temp.path().to_path_buf();
 
-        let result = screen.export_markdown(&state);
+        let result = screen.export_markdown_to(&state, output_dir);
         assert!(result.is_ok());
 
         let path = result.unwrap();

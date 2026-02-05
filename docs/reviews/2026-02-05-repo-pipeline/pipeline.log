@@ -1,0 +1,92 @@
+# Pipeline Log - 2026-02-05
+
+## Configuration
+- Max iterations: 2
+- Review scope: entire repo (greenfield)
+- Started: 2026-02-05
+
+---
+
+## Iteration 1
+
+### Review Phase
+- Review file: docs/reviews/2026-02-05-repo-pipeline/iter-1/review.md
+- Issues found: 86
+
+### Fix Phase
+- Actions log: docs/reviews/2026-02-05-repo-pipeline/iter-1/actions.log
+- FIXED: 51
+- SKIPPED: 5
+- DEFERRED: 30
+
+---
+
+## Iteration 2
+
+### Review Phase
+- Review file: docs/reviews/2026-02-05-repo-pipeline/iter-2/review.md
+- Issues found: 85
+
+### Fix Phase
+- Actions log: docs/reviews/2026-02-05-repo-pipeline/iter-2/actions.log
+- FIXED: 23
+- SKIPPED: 22
+- DEFERRED: 40
+
+---
+
+## Pipeline Summary
+
+- Total iterations: 2 (of 2 max)
+- Final status: Clean (all tests passing)
+- Ended: 2026-02-05
+
+### Per-Iteration Summary
+| Iteration | Issues Found | Fixed | Skipped | Deferred |
+|-----------|--------------|-------|---------|----------|
+| 1         | 86           | 51    | 5       | 30       |
+| 2         | 85           | 23    | 22      | 40       |
+
+### Final State
+- All tests passing: Yes (127 unit + 6 e2e)
+- Build succeeds: Yes
+- Active @review tags: 0
+
+### Tag Status
+- Active @review tags: 0 (all resolved)
+- @review-skip tags: 18
+- @review-defer tags: 93
+
+---
+
+## Meta-Analysis
+
+### Agent Effectiveness (Iteration 1)
+| Agent | Issues | Description |
+|-------|--------|-------------|
+| TA    | 38     | test-auditor |
+| CA    | 29     | comment-analyzer |
+| SFH   | 26     | silent-failure-hunter |
+| CR    | 22     | correctness-reviewer |
+| AR    | 20     | abstraction-reviewer |
+| RD    | 17     | reuse-detector |
+| CS    | 17     | code-simplifier |
+| SEC   | 9      | security-reviewer |
+| PERF  | 9      | performance-reviewer |
+| WD    | 4      | wiring-detector |
+| UTF   | 2      | (unknown) |
+
+### Skip Patterns (Iteration 2)
+Most skips in iteration 2 were due to:
+1. **Already tracked with @review-defer**: Issues already flagged in iteration 1 and deferred
+2. **Caveat verified accurate**: Reviewer's caveat was correct, no action needed
+3. **Code is synchronous**: Race condition concerns don't apply to single-threaded code
+4. **Small data sizes**: Performance optimizations not needed for typical workloads
+
+### Key RULE Insights
+The RULE lines reveal several project conventions that emerged:
+1. **UI state ownership**: Need decision on centralized vs screen-local state
+2. **Error type consolidation**: Keep separate until 3+ similar types exist
+3. **Test abstraction**: Defer when mocking infrastructure needed
+4. **Async architecture**: Acceptable to stay sync for MVP/demo scope
+5. **Magic numbers**: Inline OK for small apps, extract when values appear in >3 locations
