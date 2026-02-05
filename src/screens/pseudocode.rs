@@ -127,8 +127,18 @@ impl ScreenTrait for PseudocodeReviewScreen {
                         Ok(true)
                     }
                     KeyCode::Enter | KeyCode::Esc => {
-                        // Return to deep review
-                        state.goto(Screen::DeepReview);
+                        // Auto-transition to Summary if all reviewable sections are done
+                        let all_reviewed = state
+                            .session
+                            .sections
+                            .iter()
+                            .filter(|s| s.needs_review())
+                            .all(|s| s.is_reviewed());
+                        if all_reviewed {
+                            state.goto(Screen::Summary);
+                        } else {
+                            state.goto(Screen::DeepReview);
+                        }
                         Ok(true)
                     }
                     _ => Ok(false),
@@ -629,13 +639,13 @@ mod tests {
     }
 
     #[test]
-    fn test_pseudocode_response_navigation() {
+    fn test_pseudocode_response_auto_transitions_to_summary_when_all_reviewed() {
         use crate::models::Assessment;
 
         let mut screen = PseudocodeReviewScreen::new();
         let mut state = create_test_state();
 
-        // Simulate assessment completed (app would do this after AI call)
+        // Only one reviewable section, now reviewed → all done
         state.session.sections[0].hypothesis = Some("hypothesis".to_string());
         state.session.sections[0].assessment = Some(Assessment {
             correct: vec!["Good point".to_string()],
@@ -643,7 +653,38 @@ mod tests {
             missed: vec![],
         });
 
-        // In response mode (has assessment), Enter should go back to deep review
+        let key_enter = KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_enter, &mut state).unwrap();
+        assert_eq!(state.screen, Screen::Summary);
+    }
+
+    #[test]
+    fn test_pseudocode_response_returns_to_deep_review_when_more_to_review() {
+        use crate::models::Assessment;
+
+        let mut screen = PseudocodeReviewScreen::new();
+        let mut state = create_test_state();
+
+        // Add a second reviewable section that is NOT reviewed
+        state.session.sections.push(Section::new(
+            "s2".to_string(),
+            "Section 2".to_string(),
+            "Description 2".to_string(),
+            "+more code".to_string(),
+        ));
+        state.session.sections[1].tag = Tag::Lost;
+
+        // First section is reviewed
+        state.session.sections[0].hypothesis = Some("hypothesis".to_string());
+        state.session.sections[0].assessment = Some(Assessment {
+            correct: vec!["Good point".to_string()],
+            diverges: vec![],
+            missed: vec![],
+        });
+
         let key_enter = KeyEvent::new(
             crossterm::event::KeyCode::Enter,
             crossterm::event::KeyModifiers::NONE,

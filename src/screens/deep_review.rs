@@ -22,12 +22,12 @@ impl DeepReviewScreen {
         }
     }
 
-    /// Get sections that need review (shaky or lost, not yet reviewed).
+    /// Get all reviewable sections (shaky or lost), regardless of review status.
     ///
     /// Returns `(original_index, section)` pairs where `original_index` is the section's
     /// position in `session.sections`, not the filtered list. This index is needed for
     /// correct updates when the user selects a section.
-    fn get_sections_needing_review<'a>(
+    fn get_reviewable_sections<'a>(
         &self,
         state: &'a AppState,
     ) -> Vec<(usize, &'a crate::models::Section)> {
@@ -36,7 +36,7 @@ impl DeepReviewScreen {
             .sections
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.needs_review() && !s.is_reviewed())
+            .filter(|(_, s)| s.needs_review())
             .collect()
     }
 
@@ -77,24 +77,27 @@ impl ScreenTrait for DeepReviewScreen {
             return;
         }
 
-        // Check if all reviews are complete
-        let needs_review = self.get_sections_needing_review(state);
-        if needs_review.is_empty() && self.reviewed_count(state) > 0 {
-            self.render_completed(frame, area, state);
+        // Get all reviewable sections (shaky/lost)
+        let reviewable = self.get_reviewable_sections(state);
+
+        // Handle empty case (no sections need review)
+        if reviewable.is_empty() {
+            self.render_empty(frame, area);
             return;
         }
 
-        // Handle empty case (no sections need review)
-        if needs_review.is_empty() {
-            self.render_empty(frame, area);
+        // Check if all reviews are complete
+        let all_reviewed = reviewable.iter().all(|(_, s)| s.is_reviewed());
+        if all_reviewed {
+            self.render_completed(frame, area, state);
             return;
         }
 
         // Compute dynamic description height
         let idx = self
             .current_review_index
-            .min(needs_review.len().saturating_sub(1));
-        let description = needs_review
+            .min(reviewable.len().saturating_sub(1));
+        let description = reviewable
             .get(idx)
             .map(|(_, s)| s.description.as_str())
             .unwrap_or("");
@@ -116,9 +119,9 @@ impl ScreenTrait for DeepReviewScreen {
             .split(area);
 
         self.render_progress(frame, layout[0], state);
-        self.render_section_header(frame, layout[1], state, &needs_review);
-        self.render_content(frame, layout[2], state, &needs_review);
-        self.render_footer(frame, layout[3], state);
+        self.render_section_header(frame, layout[1], state, &reviewable);
+        self.render_content(frame, layout[2], state, &reviewable);
+        self.render_footer(frame, layout[3], state, &reviewable);
     }
 
     fn handle_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
@@ -146,9 +149,12 @@ impl ScreenTrait for DeepReviewScreen {
             };
         }
 
+        // Get all reviewable sections
+        let reviewable = self.get_reviewable_sections(state);
+
         // Check if all reviews are complete
-        let needs_review = self.get_sections_needing_review(state);
-        if needs_review.is_empty() && self.reviewed_count(state) > 0 {
+        let all_reviewed = !reviewable.is_empty() && reviewable.iter().all(|(_, s)| s.is_reviewed());
+        if all_reviewed {
             return match key.code {
                 KeyCode::Char('q') => {
                     state.quit();
@@ -167,7 +173,7 @@ impl ScreenTrait for DeepReviewScreen {
                 state.quit();
                 Ok(true)
             }
-            // Navigate to next unreviewed section
+            // Navigate to next section
             KeyCode::Char('n') => {
                 self.advance_to_next(state);
                 Ok(true)
@@ -177,12 +183,11 @@ impl ScreenTrait for DeepReviewScreen {
                 self.go_to_previous(state);
                 Ok(true)
             }
-            // Enter to start reviewing current section
+            // Enter to review current section
             KeyCode::Enter => {
-                if !needs_review.is_empty() {
-                    // Set the current section index in state and go to pseudocode review
-                    let clamped_index = self.current_review_index.min(needs_review.len() - 1);
-                    if let Some(&(section_idx, _)) = needs_review.get(clamped_index) {
+                if !reviewable.is_empty() {
+                    let clamped_index = self.current_review_index.min(reviewable.len() - 1);
+                    if let Some(&(section_idx, _)) = reviewable.get(clamped_index) {
                         // Note: goto() resets UiState, so set selected_index after goto()
                         state.goto(Screen::PseudocodeReview);
                         state.ui.selected_index = section_idx;
@@ -292,18 +297,23 @@ impl DeepReviewScreen {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         } else if let Some(section) = section {
-            // Show code preview with hint to enter
-            let code_lines: Vec<Line> = highlight_diff_lines(&section.code_blocks);
+            if section.is_reviewed() {
+                // Already reviewed — show assessment summary
+                self.render_assessment_summary(frame, area, section);
+            } else {
+                // Not yet reviewed — show code preview
+                let code_lines: Vec<Line> = highlight_diff_lines(&section.code_blocks);
 
-            let paragraph = Paragraph::new(code_lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Code - Press Enter to review"),
-                )
-                .scroll((state.ui.scroll_offset as u16, 0));
+                let paragraph = Paragraph::new(code_lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Code - Press Enter to review"),
+                    )
+                    .scroll((state.ui.scroll_offset as u16, 0));
 
-            frame.render_widget(paragraph, area);
+                frame.render_widget(paragraph, area);
+            }
         } else {
             let paragraph = Paragraph::new("No section selected")
                 .block(Block::default().borders(Borders::ALL).title("Code"))
@@ -312,10 +322,89 @@ impl DeepReviewScreen {
         }
     }
 
-    fn render_footer(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
-        let hints =
-            "n: next unreviewed | p: previous | Enter: start review | Esc: back | q: quit (saved)";
+    fn render_footer(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        _state: &AppState,
+        reviewable: &[(usize, &crate::models::Section)],
+    ) {
+        let idx = self
+            .current_review_index
+            .min(reviewable.len().saturating_sub(1));
+        let is_reviewed = reviewable
+            .get(idx)
+            .is_some_and(|(_, s)| s.is_reviewed());
+
+        let hints = if is_reviewed {
+            "n: next | p: previous | Enter: view assessment | Esc: back | q: quit (saved)"
+        } else {
+            "n: next | p: previous | Enter: review | Esc: back | q: quit (saved)"
+        };
         render_footer_hints(frame, area, hints);
+    }
+
+    fn render_assessment_summary(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        section: &crate::models::Section,
+    ) {
+        if let Some(assessment) = &section.assessment {
+            let mut lines: Vec<Line> = Vec::new();
+
+            if !assessment.correct.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "Correct:",
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )));
+                for item in &assessment.correct {
+                    lines.push(Line::from(Span::styled(
+                        format!("  - {}", item),
+                        Style::default().fg(Color::Green),
+                    )));
+                }
+                lines.push(Line::from(""));
+            }
+
+            if !assessment.diverges.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "Diverges:",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )));
+                for item in &assessment.diverges {
+                    lines.push(Line::from(Span::styled(
+                        format!("  - {}", item),
+                        Style::default().fg(Color::Yellow),
+                    )));
+                }
+                lines.push(Line::from(""));
+            }
+
+            if !assessment.missed.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "Missed:",
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                )));
+                for item in &assessment.missed {
+                    lines.push(Line::from(Span::styled(
+                        format!("  - {}", item),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
+
+            let paragraph = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Assessment (reviewed)")
+                        .border_style(Style::default().fg(Color::Green)),
+                )
+                .scroll((0, 0));
+
+            frame.render_widget(paragraph, area);
+        }
     }
 
     fn render_completed(&self, frame: &mut Frame, area: Rect, state: &AppState) {
@@ -357,14 +446,14 @@ impl DeepReviewScreen {
     }
 
     fn advance_to_next(&mut self, state: &AppState) {
-        let needs_review = self.get_sections_needing_review(state);
+        let needs_review = self.get_reviewable_sections(state);
         if !needs_review.is_empty() {
             self.current_review_index = (self.current_review_index + 1) % needs_review.len();
         }
     }
 
     fn go_to_previous(&mut self, state: &AppState) {
-        let needs_review = self.get_sections_needing_review(state);
+        let needs_review = self.get_reviewable_sections(state);
         if !needs_review.is_empty() {
             if self.current_review_index == 0 {
                 self.current_review_index = needs_review.len() - 1;
@@ -420,7 +509,7 @@ mod tests {
         let screen = DeepReviewScreen::new();
         let state = create_test_state();
 
-        let needs_review = screen.get_sections_needing_review(&state);
+        let needs_review = screen.get_reviewable_sections(&state);
         assert_eq!(needs_review.len(), 2);
         assert_eq!(needs_review[0].1.title, "Section 2");
         assert_eq!(needs_review[1].1.title, "Section 3");
@@ -497,8 +586,9 @@ mod tests {
             missed: vec![],
         });
 
-        let needs_review = screen.get_sections_needing_review(&state);
-        assert!(needs_review.is_empty());
+        let reviewable = screen.get_reviewable_sections(&state);
+        assert_eq!(reviewable.len(), 2); // Still 2 sections, but all reviewed
+        assert!(reviewable.iter().all(|(_, s)| s.is_reviewed()));
         assert_eq!(screen.reviewed_count(&state), 2);
 
         // Enter should go to summary
@@ -571,7 +661,7 @@ mod tests {
         let mut state = create_test_state();
 
         // needs_review has 2 sections (indices 0 and 1)
-        let needs_review = screen.get_sections_needing_review(&state);
+        let needs_review = screen.get_reviewable_sections(&state);
         assert_eq!(needs_review.len(), 2);
 
         // Set current_review_index to out-of-bounds value (simulating sections being removed)

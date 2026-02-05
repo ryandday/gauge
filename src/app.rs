@@ -85,16 +85,17 @@ impl App {
 
     fn main_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         loop {
-            // Handle retry requests before rendering
-            self.handle_retries();
-
             // Tick animations for loading screen
             if matches!(self.state.screen, Screen::Loading) {
                 self.loading_screen.tick();
             }
 
-            // Render current screen
+            // Render current screen BEFORE handling retries so "waiting" screens
+            // are visible during blocking AI calls
             terminal.draw(|frame| self.render(frame))?;
+
+            // Handle retry requests after rendering (blocking AI call happens here)
+            self.handle_retries();
 
             // Poll for events with timeout (allows ~4 FPS updates for responsive UI)
             if event::poll(Duration::from_millis(250))? {
