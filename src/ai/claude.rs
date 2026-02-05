@@ -117,6 +117,7 @@ impl ClaudeClient {
             Err(e) => AssessmentResult::Error(AssessmentError::new(e)),
         }
     }
+
 }
 
 /// Build the prompt for assessing a hypothesis
@@ -387,4 +388,5 @@ mod tests {
     fn test_find_matching_bracket_malformed_extra_closing() {
         assert_eq!(find_matching_bracket("}", '{', '}'), None);
     }
+
 }

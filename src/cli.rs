@@ -124,6 +124,15 @@ pub enum CodeAction {
         /// Code block ID
         code_id: String,
     },
+    /// Move a code block to another section
+    Move {
+        /// Source section ID
+        section_id: String,
+        /// Code block ID to move
+        code_id: String,
+        /// Target section ID
+        target_section_id: String,
+    },
     /// Reorder code blocks within a section
     Reorder {
         /// Section ID
@@ -335,6 +344,21 @@ mod tests {
                 assert_eq!(ids, vec!["sec_2", "sec_1"]);
             }
             _ => panic!("Expected Section Reorder"),
+        }
+    }
+
+    #[test]
+    fn test_parse_code_move() {
+        let cli = Cli::try_parse_from([
+            "gauge", "code", "move", "sec_1", "code_2", "sec_3",
+        ]).unwrap();
+        match cli.command {
+            Command::Code { action: CodeAction::Move { section_id, code_id, target_section_id } } => {
+                assert_eq!(section_id, "sec_1");
+                assert_eq!(code_id, "code_2");
+                assert_eq!(target_section_id, "sec_3");
+            }
+            _ => panic!("Expected Code Move"),
         }
     }
 

@@ -344,6 +344,11 @@ pub fn code(action: CodeAction) -> Result<()> {
             section_id,
             code_id,
         } => code_delete(&section_id, &code_id),
+        CodeAction::Move {
+            section_id,
+            code_id,
+            target_section_id,
+        } => code_move(&section_id, &code_id, &target_section_id),
         CodeAction::Reorder { section_id, ids } => code_reorder(&section_id, &ids),
         CodeAction::Update {
             section_id,
@@ -549,6 +554,58 @@ fn code_delete(section_id: &str, code_id: &str) -> Result<()> {
     section.derive_files();
     save_session(&session)?;
     eprintln!("Deleted code block '{}' from section '{}'", code_id, section_id);
+    Ok(())
+}
+
+fn code_move(section_id: &str, code_id: &str, target_section_id: &str) -> Result<()> {
+    if section_id == target_section_id {
+        return Err(AppError::Session(
+            "Source and target sections are the same".to_string(),
+        ));
+    }
+
+    let mut session = load_active_session()?;
+
+    // Find source section and remove the code block
+    let src_idx = session
+        .sections
+        .iter()
+        .position(|s| s.id == section_id)
+        .ok_or_else(|| AppError::Session(format!("Source section '{}' not found", section_id)))?;
+
+    let tgt_idx = session
+        .sections
+        .iter()
+        .position(|s| s.id == target_section_id)
+        .ok_or_else(|| {
+            AppError::Session(format!(
+                "Target section '{}' not found",
+                target_section_id
+            ))
+        })?;
+
+    let block_idx = session.sections[src_idx]
+        .code_blocks
+        .iter()
+        .position(|cb| cb.id == code_id)
+        .ok_or_else(|| {
+            AppError::Session(format!(
+                "Code block '{}' not found in section '{}'",
+                code_id, section_id
+            ))
+        })?;
+
+    let block = session.sections[src_idx].code_blocks.remove(block_idx);
+    session.sections[src_idx].derive_files();
+
+    session.sections[tgt_idx].code_blocks.push(block);
+    session.sections[tgt_idx].derive_files();
+
+    save_session(&session)?;
+    eprintln!(
+        "Moved code block '{}' from '{}' to '{}'",
+        code_id, section_id, target_section_id
+    );
     Ok(())
 }
 

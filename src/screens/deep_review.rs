@@ -200,6 +200,23 @@ impl ScreenTrait for DeepReviewScreen {
                 state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
                 Ok(true)
             }
+            // Split section via AI
+            KeyCode::Char('s') => {
+                let split_id = if !reviewable.is_empty() && !state.ui.ai_loading {
+                    let idx = self.current_review_index.min(reviewable.len() - 1);
+                    reviewable
+                        .get(idx)
+                        .filter(|(_, s)| !s.is_reviewed())
+                        .map(|(_, s)| s.id.clone())
+                } else {
+                    None
+                };
+                if let Some(id) = split_id {
+                    state.ui.ai_loading = true;
+                    state.ui.needs_split = Some(id);
+                }
+                Ok(true)
+            }
             // Enter to review current section
             KeyCode::Enter => {
                 if !reviewable.is_empty() {
@@ -314,7 +331,11 @@ impl DeepReviewScreen {
 
         if state.ui.ai_loading {
             // Waiting for AI state - show spinner overlay
-            let text = "Waiting for AI response...\n\nYou can navigate away with 'n'/'p' keys.";
+            let text = if state.ui.needs_split.is_some() {
+                "Splitting section...\n\nAI is creating smaller sections. Please wait."
+            } else {
+                "Waiting for AI response...\n\nYou can navigate away with 'n'/'p' keys."
+            };
             let paragraph = Paragraph::new(text)
                 .block(
                     Block::default()
@@ -367,7 +388,7 @@ impl DeepReviewScreen {
         let hints = if is_reviewed {
             "j/k: scroll | d/u: half-page | n/p: navigate | Enter: view | Esc: back | q: quit"
         } else {
-            "j/k: scroll | d/u: half-page | n/p: navigate | Enter: review | Esc: back | q: quit"
+            "j/k: scroll | n/p: navigate | Enter: review | s: split | Esc: back | q: quit"
         };
         render_footer_hints(frame, area, hints);
     }
