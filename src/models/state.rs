@@ -76,9 +76,6 @@ pub struct UiState {
 
     /// Whether assessment needs to be retried (set when user presses 'r' on error)
     pub needs_assessment_retry: bool,
-
-    /// Section ID to split (set when user presses 's' in deep review)
-    pub needs_split: Option<String>,
 }
 
 impl UiState {

@@ -1,4 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use std::collections::HashMap;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
@@ -13,7 +15,8 @@ use crate::models::{AppState, Screen, Tag};
 /// See `UiState` documentation for the hybrid selection state pattern.
 pub struct TriageScreen {
     list_state: ListState,
-    code_focused: bool,
+    /// Per-section scroll offsets for code preview (keyed by section index)
+    scroll_offsets: HashMap<usize, usize>,
 }
 
 impl TriageScreen {
@@ -22,7 +25,7 @@ impl TriageScreen {
         list_state.select(Some(0));
         Self {
             list_state,
-            code_focused: false,
+            scroll_offsets: HashMap::new(),
         }
     }
 }
@@ -102,7 +105,6 @@ impl ScreenTrait for TriageScreen {
                 state.quit();
                 Ok(true)
             }
-            _ if self.code_focused => self.handle_code_input(key, state),
             _ => self.handle_list_input(key, state),
         }
     }
@@ -120,10 +122,17 @@ impl TriageScreen {
                 self.select_previous(state);
                 Ok(true)
             }
-            // Focus code panel
-            KeyCode::Enter | KeyCode::Char('l') => {
-                self.code_focused = true;
-                state.ui.scroll_offset = 0;
+            // Scroll code preview with Ctrl+D / Ctrl+U
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let idx = self.list_state.selected().unwrap_or(0);
+                let offset = self.scroll_offsets.entry(idx).or_insert(0);
+                *offset = offset.saturating_add(10);
+                Ok(true)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let idx = self.list_state.selected().unwrap_or(0);
+                let offset = self.scroll_offsets.entry(idx).or_insert(0);
+                *offset = offset.saturating_sub(10);
                 Ok(true)
             }
             // Tagging (auto-advances; transitions when all tagged)
@@ -137,47 +146,6 @@ impl TriageScreen {
             }
             KeyCode::Char('3') => {
                 self.tag_and_advance(state, Tag::Lost);
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
-
-    fn handle_code_input(&mut self, key: KeyEvent, state: &mut AppState) -> Result<bool> {
-        match key.code {
-            KeyCode::Char('h') => {
-                self.code_focused = false;
-                Ok(true)
-            }
-            KeyCode::Char('1') => {
-                self.code_focused = false;
-                self.tag_and_advance(state, Tag::GotIt);
-                Ok(true)
-            }
-            KeyCode::Char('2') => {
-                self.code_focused = false;
-                self.tag_and_advance(state, Tag::Shaky);
-                Ok(true)
-            }
-            KeyCode::Char('3') => {
-                self.code_focused = false;
-                self.tag_and_advance(state, Tag::Lost);
-                Ok(true)
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(1);
-                Ok(true)
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(1);
-                Ok(true)
-            }
-            KeyCode::Char('d') => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(10);
-                Ok(true)
-            }
-            KeyCode::Char('u') => {
-                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
                 Ok(true)
             }
             _ => Ok(false),
@@ -255,18 +223,12 @@ impl TriageScreen {
             })
             .collect();
 
-        let border_style = if self.code_focused {
-            Style::default().fg(Color::DarkGray)
-        } else {
-            Style::default().fg(Color::Cyan)
-        };
-
         let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Sections")
-                    .border_style(border_style),
+                    .border_style(Style::default().fg(Color::Cyan)),
             )
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             .highlight_symbol(">> ");
@@ -319,32 +281,26 @@ impl TriageScreen {
         };
         let code_lines: Vec<Line> = highlight_diff_lines(blocks);
 
-        let code_border_style = if self.code_focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
+        let scroll_offset = self.scroll_offsets.get(&selected_idx).copied().unwrap_or(0);
 
         let code_paragraph = Paragraph::new(code_lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Code")
-                    .border_style(code_border_style),
+                    .border_style(Style::default().fg(Color::DarkGray)),
             )
-            .scroll((state.ui.scroll_offset as u16, 0));
+            .scroll((scroll_offset as u16, 0));
 
         frame.render_widget(code_paragraph, preview_layout[1]);
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
-        let hints = if self.code_focused {
-            "j/k: scroll | u/d: half-page | 1-3: tag & next | h: back | q: quit"
-        } else {
-            "j/k: navigate | l/Enter: view code | 1-3: tag & next | q: quit"
-        };
-
-        render_footer_hints(frame, area, hints);
+        render_footer_hints(
+            frame,
+            area,
+            "j/k: navigate | Ctrl-d/u: scroll code | 1-3: tag & next | q: quit",
+        );
     }
 
     fn render_empty(&self, frame: &mut Frame, area: Rect) {
@@ -389,7 +345,6 @@ impl TriageScreen {
             state.goto(Screen::DeepReview);
         } else {
             self.select_next(state);
-            state.ui.scroll_offset = 0;
         }
     }
 
@@ -558,116 +513,66 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_enters_code_focus() {
+    fn test_ctrl_d_scrolls_code_down() {
         let mut screen = TriageScreen::new();
         let mut state = create_test_state();
 
-        let key_enter = KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_enter, &mut state).unwrap();
-        assert!(screen.code_focused);
-        assert_eq!(state.ui.scroll_offset, 0);
+        let key_ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 10);
+
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 20);
     }
 
     #[test]
-    fn test_l_enters_code_focus() {
+    fn test_ctrl_u_scrolls_code_up() {
         let mut screen = TriageScreen::new();
         let mut state = create_test_state();
 
-        let key_l = KeyEvent::new(
-            crossterm::event::KeyCode::Char('l'),
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_l, &mut state).unwrap();
-        assert!(screen.code_focused);
+        // First scroll down
+        let key_ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 20);
+
+        // Then scroll up
+        let key_ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+        screen.handle_input(key_ctrl_u, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 10);
+
+        // Saturating subtraction at 0
+        screen.handle_input(key_ctrl_u, &mut state).unwrap();
+        screen.handle_input(key_ctrl_u, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 0);
     }
 
     #[test]
-    fn test_h_returns_to_list_focus() {
+    fn test_per_section_scroll_persistence() {
         let mut screen = TriageScreen::new();
         let mut state = create_test_state();
 
-        // Enter code focus
-        screen.code_focused = true;
+        // Scroll section 0's code preview
+        let key_ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 10);
 
-        let key_h = KeyEvent::new(
-            crossterm::event::KeyCode::Char('h'),
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_h, &mut state).unwrap();
-        assert!(!screen.code_focused);
-    }
-
-    #[test]
-    fn test_code_focus_jk_scrolls_by_one() {
-        let mut screen = TriageScreen::new();
-        let mut state = create_test_state();
-        screen.code_focused = true;
-
-        let key_j = KeyEvent::new(
-            crossterm::event::KeyCode::Char('j'),
-            crossterm::event::KeyModifiers::NONE,
-        );
+        // Navigate to section 1
+        let key_j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         screen.handle_input(key_j, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 1);
+        assert_eq!(screen.list_state.selected(), Some(1));
 
-        screen.handle_input(key_j, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 2);
+        // Section 1 should start at offset 0
+        assert_eq!(screen.scroll_offsets.get(&1).copied().unwrap_or(0), 0);
 
-        let key_k = KeyEvent::new(
-            crossterm::event::KeyCode::Char('k'),
-            crossterm::event::KeyModifiers::NONE,
-        );
+        // Scroll section 1
+        screen.handle_input(key_ctrl_d, &mut state).unwrap();
+        assert_eq!(*screen.scroll_offsets.get(&1).unwrap(), 10);
+
+        // Navigate back to section 0 — scroll should be preserved
+        let key_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
         screen.handle_input(key_k, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 1);
-    }
-
-    #[test]
-    fn test_code_focus_ud_scrolls_by_ten() {
-        let mut screen = TriageScreen::new();
-        let mut state = create_test_state();
-        screen.code_focused = true;
-
-        let key_d = KeyEvent::new(
-            crossterm::event::KeyCode::Char('d'),
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_d, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 10);
-
-        screen.handle_input(key_d, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 20);
-
-        let key_u = KeyEvent::new(
-            crossterm::event::KeyCode::Char('u'),
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_u, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 10);
-
-        // Test saturating subtraction
-        screen.handle_input(key_u, &mut state).unwrap();
-        screen.handle_input(key_u, &mut state).unwrap();
-        assert_eq!(state.ui.scroll_offset, 0);
-    }
-
-    #[test]
-    fn test_enter_resets_scroll_offset() {
-        let mut screen = TriageScreen::new();
-        let mut state = create_test_state();
-
-        // Set a non-zero scroll offset
-        state.ui.scroll_offset = 15;
-
-        let key_enter = KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        );
-        screen.handle_input(key_enter, &mut state).unwrap();
-        assert!(screen.code_focused);
-        assert_eq!(state.ui.scroll_offset, 0);
+        assert_eq!(*screen.scroll_offsets.get(&0).unwrap(), 10);
     }
 
     #[test]

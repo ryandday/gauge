@@ -1,5 +1,4 @@
 use std::io::{self, Stdout};
-use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -17,7 +16,6 @@ use crate::screens::{
     DeepReviewScreen, LoadingScreen, PseudocodeReviewScreen, ScreenTrait, SummaryScreen,
     TriageScreen,
 };
-use crate::session::{load_session, save_session, SessionLoadResult};
 
 /// Main application that manages the TUI
 pub struct App {
@@ -129,11 +127,6 @@ impl App {
             self.state.ui.needs_assessment_retry = false;
             self.retry_assessment();
         }
-
-        // Handle section split
-        if let Some(section_id) = self.state.ui.needs_split.take() {
-            self.split_current_section(&section_id);
-        }
     }
 
     /// Retry assessing the current hypothesis with AI
@@ -169,77 +162,6 @@ impl App {
                 self.state.ui.set_error(e.message);
             }
         }
-    }
-
-    /// Reload session from disk, replacing in-memory state
-    fn reload_session(&mut self) -> Result<()> {
-        let name = self.state.session.name.clone();
-        match load_session(&name)? {
-            SessionLoadResult::Loaded(session) => {
-                self.state.session = session;
-                Ok(())
-            }
-            SessionLoadResult::Corrupted { path, error } => Err(AppError::Session(format!(
-                "Session file corrupted after split ({}): {}",
-                path.display(),
-                error
-            ))),
-            SessionLoadResult::NotFound => Err(AppError::Session(format!(
-                "Session '{}' not found after split",
-                name
-            ))),
-        }
-    }
-
-    /// Split the current section by shelling out to Claude CLI
-    fn split_current_section(&mut self, section_id: &str) {
-        // Save current session to disk so Claude can read it
-        if let Err(e) = save_session(&self.state.session) {
-            self.state.ui.set_error(format!("Failed to save session before split: {}", e));
-            self.state.ui.ai_loading = false;
-            return;
-        }
-
-        let session_name = self.state.session.name.clone();
-        let prompt = build_split_prompt(&session_name, section_id);
-
-        // Shell out to Claude CLI
-        let result = Command::new("claude")
-            .args(["--dangerously-skip-permissions", "-p", &prompt])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .and_then(|child| child.wait_with_output());
-
-        match result {
-            Ok(output) if output.status.success() => {
-                // Reload session from disk (Claude modified it via gauge commands)
-                match self.reload_session() {
-                    Ok(()) => {
-                        self.state.goto(Screen::Triage);
-                    }
-                    Err(e) => {
-                        self.state
-                            .ui
-                            .set_error(format!("Failed to reload session after split: {}", e));
-                    }
-                }
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                self.state
-                    .ui
-                    .set_error(format!("Split failed: {}", stderr.trim()));
-            }
-            Err(e) => {
-                self.state
-                    .ui
-                    .set_error(format!("Failed to run Claude CLI: {}", e));
-            }
-        }
-
-        self.state.ui.ai_loading = false;
     }
 
     fn render(&self, frame: &mut Frame) {
@@ -292,36 +214,6 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
         .map_err(|e| AppError::Terminal(format!("Failed to show cursor: {}", e)))?;
 
     Ok(())
-}
-
-/// Build the prompt for Claude to split a section using gauge CLI commands
-fn build_split_prompt(session_name: &str, section_id: &str) -> String {
-    format!(
-        r#"You are splitting a code review section into smaller, more focused sections.
-
-The active gauge session is "{session_name}". The section to split is "{section_id}".
-
-First, run `gauge section show {section_id}` and `gauge code list {section_id}` to understand the section.
-Then read the code blocks with `gauge code show {section_id} <code_id>` for each block.
-
-Analyze the code and split it into 2-5 smaller sections, each covering a cohesive unit of functionality.
-
-For each new section:
-1. Create it: `gauge section add --title "<title>" --description "<description>"`
-   (this prints the new section ID)
-2. Move relevant code blocks to it: `gauge code move {section_id} <code_id> <new_section_id>`
-
-After moving all code blocks out, delete the original empty section:
-`gauge section delete {section_id}`
-
-Important:
-- Every code block must be moved to exactly one new section
-- Do not leave any code blocks in the original section
-- Delete the original section only after all blocks are moved
-- Keep titles concise and descriptions informative"#,
-        session_name = session_name,
-        section_id = section_id,
-    )
 }
 
 #[cfg(test)]
