@@ -103,8 +103,8 @@ impl ScreenTrait for DeepReviewScreen {
             .unwrap_or("");
         let inner_width = area.width.saturating_sub(2);
         let text_lines = wrapped_height(description, inner_width);
-        let desc_height = (text_lines + 2) // +2 for borders
-            .max(3)                         // at least 1 line + borders
+        let desc_height = (text_lines + 4) // +2 for title line and blank separator, +2 for borders
+            .max(5)                         // at least title + blank + 1 desc line + borders
             .min(area.height / 2);          // cap at half screen
 
         // Main layout
@@ -183,6 +183,23 @@ impl ScreenTrait for DeepReviewScreen {
                 self.go_to_previous(state);
                 Ok(true)
             }
+            // Scroll code preview
+            KeyCode::Char('j') | KeyCode::Down => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(1);
+                Ok(true)
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(1);
+                Ok(true)
+            }
+            KeyCode::Char('d') => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(10);
+                Ok(true)
+            }
+            KeyCode::Char('u') => {
+                state.ui.scroll_offset = state.ui.scroll_offset.saturating_sub(10);
+                Ok(true)
+            }
             // Enter to review current section
             KeyCode::Enter => {
                 if !reviewable.is_empty() {
@@ -200,7 +217,7 @@ impl ScreenTrait for DeepReviewScreen {
                 state.goto(Screen::Triage);
                 Ok(true)
             }
-            // Scroll code preview (for large diffs)
+            // Scroll code preview (Ctrl+d/u, PageDown/PageUp)
             _ => {
                 if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset) {
                     Ok(consumed)
@@ -265,8 +282,19 @@ impl DeepReviewScreen {
             ("No section".to_string(), "")
         };
 
-        let header = Paragraph::new(description)
-            .block(Block::default().borders(Borders::ALL).title(title))
+        let desc_text = vec![
+            Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(description),
+        ];
+
+        let header = Paragraph::new(desc_text)
+            .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: true });
 
         frame.render_widget(header, area);
@@ -337,9 +365,9 @@ impl DeepReviewScreen {
             .is_some_and(|(_, s)| s.is_reviewed());
 
         let hints = if is_reviewed {
-            "n: next | p: previous | Enter: view assessment | Esc: back | q: quit (saved)"
+            "j/k: scroll | d/u: half-page | n/p: navigate | Enter: view | Esc: back | q: quit"
         } else {
-            "n: next | p: previous | Enter: review | Esc: back | q: quit (saved)"
+            "j/k: scroll | d/u: half-page | n/p: navigate | Enter: review | Esc: back | q: quit"
         };
         render_footer_hints(frame, area, hints);
     }

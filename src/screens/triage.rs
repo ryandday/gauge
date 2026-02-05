@@ -149,6 +149,21 @@ impl TriageScreen {
                 self.code_focused = false;
                 Ok(true)
             }
+            KeyCode::Char('1') => {
+                self.code_focused = false;
+                self.tag_and_advance(state, Tag::GotIt);
+                Ok(true)
+            }
+            KeyCode::Char('2') => {
+                self.code_focused = false;
+                self.tag_and_advance(state, Tag::Shaky);
+                Ok(true)
+            }
+            KeyCode::Char('3') => {
+                self.code_focused = false;
+                self.tag_and_advance(state, Tag::Lost);
+                Ok(true)
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 state.ui.scroll_offset = state.ui.scroll_offset.saturating_add(1);
                 Ok(true)
@@ -324,7 +339,7 @@ impl TriageScreen {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
         let hints = if self.code_focused {
-            "j/k: scroll | u/d: half-page | h: back | q: quit"
+            "j/k: scroll | u/d: half-page | 1-3: tag & next | h: back | q: quit"
         } else {
             "j/k: navigate | l/Enter: view code | 1-3: tag & next | q: quit"
         };

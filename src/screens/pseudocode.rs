@@ -3,8 +3,8 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use super::{
-    handle_error_state_input, highlight_diff_lines, render_footer_hints, ErrorInputResult,
-    ScreenTrait,
+    handle_error_state_input, handle_scroll_input, highlight_diff_lines, render_footer_hints,
+    ErrorInputResult, ScreenTrait,
 };
 use crate::error::Result;
 use crate::models::{AppState, Screen};
@@ -144,6 +144,11 @@ impl ScreenTrait for PseudocodeReviewScreen {
                     _ => Ok(false),
                 };
             }
+        }
+
+        // Scroll code panel (Ctrl+d/u, PageDown/PageUp) - check before text input
+        if let Some(consumed) = handle_scroll_input(&key, &mut state.ui.scroll_offset) {
+            return Ok(consumed);
         }
 
         // Input mode handling
@@ -341,7 +346,7 @@ impl PseudocodeReviewScreen {
         frame.render_widget(input, layout[0]);
 
         // Hints
-        let hints = "Enter: submit hypothesis | Esc: back (saves draft)";
+        let hints = "Ctrl+d/u: scroll code | Enter: submit | Esc: back (saves draft)";
         render_footer_hints(frame, layout[1], hints);
     }
 
