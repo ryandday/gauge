@@ -7,7 +7,7 @@ use super::{
     wrapped_height, ErrorInputResult, ScreenTrait,
 };
 use crate::error::Result;
-use crate::models::{AppState, Tag};
+use crate::models::{AppState, Screen, Tag};
 
 /// Screen for triaging all sections before deep review.
 /// See `UiState` documentation for the hybrid selection state pattern.
@@ -126,17 +126,17 @@ impl TriageScreen {
                 state.ui.scroll_offset = 0;
                 Ok(true)
             }
-            // Tagging
+            // Tagging (auto-advances; transitions when all tagged)
             KeyCode::Char('1') => {
-                self.tag_current(state, Tag::GotIt);
+                self.tag_and_advance(state, Tag::GotIt);
                 Ok(true)
             }
             KeyCode::Char('2') => {
-                self.tag_current(state, Tag::Shaky);
+                self.tag_and_advance(state, Tag::Shaky);
                 Ok(true)
             }
             KeyCode::Char('3') => {
-                self.tag_current(state, Tag::Lost);
+                self.tag_and_advance(state, Tag::Lost);
                 Ok(true)
             }
             _ => Ok(false),
@@ -271,17 +271,28 @@ impl TriageScreen {
         // Split preview: description at top (dynamic height), code below
         let inner_width = area.width.saturating_sub(2); // subtract borders
         let text_lines = wrapped_height(description, inner_width);
-        let desc_height = (text_lines + 2) // +2 for top/bottom borders
-            .max(3)                         // at least 1 line of text + borders
+        // +2 for title line and blank separator, +2 for borders
+        let desc_height = (text_lines + 4)
+            .max(5)                         // at least title + blank + 1 desc line + borders
             .min(area.height / 2);          // cap at half the panel
         let preview_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(desc_height), Constraint::Min(0)])
             .split(area);
 
-        // Description panel
-        let desc_paragraph = Paragraph::new(description)
-            .block(Block::default().borders(Borders::ALL).title(title))
+        // Description panel: bold title line + description body
+        let desc_text = vec![
+            Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(description),
+        ];
+        let desc_paragraph = Paragraph::new(desc_text)
+            .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: true });
         frame.render_widget(desc_paragraph, preview_layout[0]);
 
@@ -315,7 +326,7 @@ impl TriageScreen {
         let hints = if self.code_focused {
             "j/k: scroll | u/d: half-page | h: back | q: quit"
         } else {
-            "j/k: navigate | l/Enter: view code | 1-3: tag | q: quit"
+            "j/k: navigate | l/Enter: view code | 1-3: tag & next | q: quit"
         };
 
         render_footer_hints(frame, area, hints);
@@ -357,6 +368,16 @@ impl TriageScreen {
         self.list_state.select(Some(prev));
     }
 
+    fn tag_and_advance(&mut self, state: &mut AppState, tag: Tag) {
+        self.tag_current(state, tag);
+        if state.session.all_tagged() {
+            state.goto(Screen::DeepReview);
+        } else {
+            self.select_next(state);
+            state.ui.scroll_offset = 0;
+        }
+    }
+
     fn tag_current(&mut self, state: &mut AppState, tag: Tag) {
         let selected = self.list_state.selected().unwrap_or(0);
         if let Some(section) = state.session.sections.get_mut(selected) {
@@ -386,7 +407,9 @@ mod tests {
                 "code".to_string(),
             ),
         ];
-        AppState::new(session)
+        let mut state = AppState::new(session);
+        state.goto(Screen::Triage);
+        state
     }
 
     #[test]
@@ -421,6 +444,7 @@ mod tests {
         screen.tag_current(&mut state, Tag::GotIt);
         assert_eq!(state.session.sections[0].tag, Tag::GotIt);
 
+        // tag_current doesn't advance; the key handler does
         screen.select_next(&state);
         screen.tag_current(&mut state, Tag::Shaky);
         assert_eq!(state.session.sections[1].tag, Tag::Shaky);
@@ -468,29 +492,54 @@ mod tests {
         let mut screen = TriageScreen::new();
         let mut state = create_test_state();
 
-        // Test 1 key (got it)
+        // Test 1 key (got it) — tags section 0, auto-advances to section 1
         let key_1 = KeyEvent::new(
             crossterm::event::KeyCode::Char('1'),
             crossterm::event::KeyModifiers::NONE,
         );
         screen.handle_input(key_1, &mut state).unwrap();
         assert_eq!(state.session.sections[0].tag, Tag::GotIt);
+        assert_eq!(screen.list_state.selected(), Some(1));
+        assert_eq!(state.screen, Screen::Triage); // not all tagged yet
 
-        // Test 2 key (shaky)
+        // Test 2 key (shaky) — tags section 1, all tagged → transitions to DeepReview
         let key_2 = KeyEvent::new(
             crossterm::event::KeyCode::Char('2'),
             crossterm::event::KeyModifiers::NONE,
         );
         screen.handle_input(key_2, &mut state).unwrap();
-        assert_eq!(state.session.sections[0].tag, Tag::Shaky);
+        assert_eq!(state.session.sections[1].tag, Tag::Shaky);
+        assert_eq!(state.screen, Screen::DeepReview);
+    }
 
-        // Test 3 key (lost)
+    #[test]
+    fn test_triage_retag_does_not_transition() {
+        let mut screen = TriageScreen::new();
+        let mut state = create_test_state();
+
+        // Tag section 0 → advances to section 1
+        let key_1 = KeyEvent::new(
+            crossterm::event::KeyCode::Char('1'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_1, &mut state).unwrap();
+        assert_eq!(screen.list_state.selected(), Some(1));
+
+        // Navigate back to section 0 and retag with 3 (lost)
+        let key_k = KeyEvent::new(
+            crossterm::event::KeyCode::Char('k'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        screen.handle_input(key_k, &mut state).unwrap();
         let key_3 = KeyEvent::new(
             crossterm::event::KeyCode::Char('3'),
             crossterm::event::KeyModifiers::NONE,
         );
         screen.handle_input(key_3, &mut state).unwrap();
         assert_eq!(state.session.sections[0].tag, Tag::Lost);
+        // Section 1 still untagged, so should stay in triage
+        assert_eq!(state.screen, Screen::Triage);
+        assert_eq!(screen.list_state.selected(), Some(1));
     }
 
     #[test]

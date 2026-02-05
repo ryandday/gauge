@@ -77,12 +77,12 @@ pub fn highlight_diff_lines(blocks: &[CodeBlock]) -> Vec<Line<'static>> {
             }
 
             // Code lines: strip prefix, highlight, prepend colored prefix
-            let (prefix_char, prefix_style) = if line.starts_with('+') {
-                ("+", Style::default().fg(Color::Green))
+            let (prefix_char, prefix_style, line_bg) = if line.starts_with('+') {
+                ("+", Style::default().fg(Color::Green).bg(Color::Rgb(0, 35, 0)), Some(Color::Rgb(0, 35, 0)))
             } else if line.starts_with('-') {
-                ("-", Style::default().fg(Color::Red))
+                ("-", Style::default().fg(Color::Red).bg(Color::Rgb(50, 0, 0)), Some(Color::Rgb(50, 0, 0)))
             } else if line.starts_with(' ') {
-                (" ", Style::default())
+                (" ", Style::default(), None)
             } else {
                 // No recognized prefix — highlight the whole line as-is
                 match highlighter.highlight_line(line, &SYNTAX_SET) {
@@ -106,10 +106,11 @@ pub fn highlight_diff_lines(blocks: &[CodeBlock]) -> Vec<Line<'static>> {
                     let mut spans: Vec<Span<'static>> = Vec::with_capacity(ranges.len() + 1);
                     spans.push(Span::styled(prefix_char.to_string(), prefix_style));
                     for (style, text) in ranges {
-                        spans.push(Span::styled(
-                            text.to_string(),
-                            syntect_to_ratatui_style(style),
-                        ));
+                        let mut ratatui_style = syntect_to_ratatui_style(style);
+                        if let Some(bg) = line_bg {
+                            ratatui_style = ratatui_style.bg(bg);
+                        }
+                        spans.push(Span::styled(text.to_string(), ratatui_style));
                     }
                     lines.push(Line::from(spans));
                 }
