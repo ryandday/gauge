@@ -4,7 +4,7 @@ name = "gauge"
 version = "0.1.0"
 edition = "2021"
 description = "Interactive code review TUI for understanding diffs"
-license = "MIT"
+license = "Apache-2.0"
 authors = ["Ryan Day"]
 
 [[bin]]
