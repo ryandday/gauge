@@ -229,3 +229,71 @@ screens:
     screen_states:
       default: "All statistics visible, export option available"
       exported: "Confirmation message with file path shown"
+
+# ============ TECHNICAL DECISIONS ============
+
+# Where does data live?
+state:
+  ephemeral:  # UI state that resets on navigation
+    - "Current scroll position in section list"
+    - "Selected section index"
+    - "Text cursor position in hypothesis input"
+    - "Spinner/loading visibility"
+  persistent:  # Survives app restart (~/.sherpa/sessions/)
+    - "Session data: diff identifier, sections with tags, hypotheses, AI responses"
+    - "Current stage (triage/review/summary) and progress within that stage"
+    - "Draft hypothesis text (saved on each keystroke or on quit)"
+
+# Session identity
+session_matching:
+  identifier: "Diff range string (e.g., HEAD~5..HEAD) OR branch name compared to main"
+  storage_path: "~/.sherpa/sessions/<hash-of-identifier>.json"
+  expiration: "Never - sessions persist until user deletes"
+  conflict: "If identifier matches existing session, auto-resume; use --new to force fresh"
+
+# AI integration
+ai:
+  method: "Shell out to `claude -p` subprocess"
+  timeout: "None - wait indefinitely for response"
+  concurrency: "One AI call at a time (user can navigate while waiting)"
+  retry: "Manual via 'r' key on error; no automatic retry"
+
+# Export
+export:
+  location: "docs/ folder in current working directory"
+  filename: "sherpa-review-<date>-<time>.md"
+  content: "Full transcript of all sections, hypotheses, and AI responses"
+
+# Who can access what?
+security:
+  - data: "Session files in ~/.sherpa/sessions/"
+    access: "Local user only (standard file permissions)"
+    sensitive: false
+  - data: "User hypotheses and AI responses"
+    access: "Stored locally, sent to Claude via subprocess"
+    sensitive: false
+  - data: "Source code from diffs"
+    access: "Read from local git repo, sent to Claude for analysis"
+    sensitive: true  # May contain proprietary code
+
+# What must ALWAYS be true?
+invariants:
+  - condition: "Every section has exactly one tag (untagged, got_it, shaky, or lost)"
+    if_violated: "Section appears in wrong list or is skipped incorrectly"
+  - condition: "Session file is valid JSON and matches expected schema"
+    if_violated: "Session cannot resume; treat as corrupted and offer fresh start"
+  - condition: "AI subprocess is either running OR completed, never both"
+    if_violated: "UI shows wrong state (spinner when complete or vice versa)"
+  - condition: "User hypothesis is preserved until AI response is received"
+    if_violated: "User loses their work on retry"
+
+# What's risky and needs testing?
+testing_focus:
+  - risk: "Session file corruption on unexpected quit (Ctrl+C, kill)"
+    verify: "Session saves atomically (write temp file, rename); recovers gracefully from partial writes"
+  - risk: "Claude subprocess hangs or produces malformed output"
+    verify: "App remains responsive; user can navigate away; handles non-JSON output gracefully"
+  - risk: "Large diffs overwhelm UI or AI context"
+    verify: "Sections chunk large diffs into manageable pieces; UI scrolls smoothly with many sections"
+  - risk: "Special characters in code or hypothesis break JSON/display"
+    verify: "Unicode, escape sequences, and long lines render correctly"
