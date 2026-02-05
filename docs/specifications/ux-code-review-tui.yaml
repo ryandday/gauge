@@ -253,7 +253,7 @@ session_matching:
 
 # AI integration
 ai:
-  method: "Shell out to `claude -p` subprocess"
+  method: "Shell out to `claude --dangerously-skip-permissions -p` subprocess"
   timeout: "None - wait indefinitely for response"
   concurrency: "One AI call at a time (user can navigate while waiting)"
   retry: "Manual via 'r' key on error; no automatic retry"
