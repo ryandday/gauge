@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_app_state_goto() {
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut app = AppState::new(session);
 
         app.goto(Screen::Triage);

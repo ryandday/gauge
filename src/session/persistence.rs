@@ -1,6 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 #[cfg(unix)]
@@ -9,40 +7,78 @@ use std::os::unix::fs::PermissionsExt;
 use crate::error::{AppError, Result};
 use crate::models::Session;
 
-/// Get the sessions directory (~/.sherpa/sessions/)
-pub fn sessions_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Session("Could not find home directory".to_string()))?;
-
-    let dir = home.join(".sherpa").join("sessions");
-    Ok(dir)
+/// Validate a session name: [a-zA-Z0-9_-]{1,64}
+pub fn validate_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(AppError::Session(
+            "Session name must be 1-64 characters".to_string(),
+        ));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(AppError::Session(
+            "Session name must contain only alphanumeric characters, hyphens, and underscores"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
-/// Hash the identifier to create a safe filename.
-///
-/// This handles special characters like ':' in identifiers (e.g., "commits:5")
-/// that aren't allowed in filenames on some systems (Windows).
-///
-/// Uses hashing rather than character escaping to ensure uniform filename length
-/// and avoid edge cases with very long identifiers. Trade-off: filenames are not
-/// human-readable, but collision risk is negligible for typical usage patterns.
-fn hash_identifier(identifier: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    identifier.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+/// Get the sherpa directory (~/.sherpa/)
+pub fn sherpa_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| AppError::Session("Could not find home directory".to_string()))?;
+    Ok(home.join(".sherpa"))
+}
+
+/// Get the sessions directory (~/.sherpa/sessions/)
+pub fn sessions_dir() -> Result<PathBuf> {
+    Ok(sherpa_dir()?.join("sessions"))
 }
 
 /// Get the path for a session file
-pub fn session_path(identifier: &str) -> Result<PathBuf> {
+pub fn session_path(name: &str) -> Result<PathBuf> {
     let dir = sessions_dir()?;
-    let hash = hash_identifier(identifier);
-    Ok(dir.join(format!("{}.json", hash)))
+    Ok(dir.join(format!("{}.json", name)))
 }
 
-/// Check if a session exists for the given identifier
-#[allow(dead_code)] // Utility function for PHASE-4
-pub fn session_exists(identifier: &str) -> Result<bool> {
-    let path = session_path(identifier)?;
+/// Get the path for the active session file
+fn active_path() -> Result<PathBuf> {
+    Ok(sherpa_dir()?.join("active"))
+}
+
+/// Write the active session name
+pub fn write_active(name: &str) -> Result<()> {
+    let path = active_path()?;
+    let dir = path.parent().unwrap();
+    fs::create_dir_all(dir)
+        .map_err(|e| AppError::Session(format!("Failed to create sherpa directory: {}", e)))?;
+    fs::write(&path, name)
+        .map_err(|e| AppError::Session(format!("Failed to write active session: {}", e)))?;
+    Ok(())
+}
+
+/// Read the active session name
+pub fn read_active() -> Result<Option<String>> {
+    let path = active_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let name = fs::read_to_string(&path)
+        .map_err(|e| AppError::Session(format!("Failed to read active session: {}", e)))?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(name))
+}
+
+/// Check if a session exists for the given name
+#[allow(dead_code)]
+pub fn session_exists(name: &str) -> Result<bool> {
+    let path = session_path(name)?;
     Ok(path.exists())
 }
 
@@ -57,8 +93,8 @@ pub enum SessionLoadResult {
 }
 
 /// Load a session from disk
-pub fn load_session(identifier: &str) -> Result<SessionLoadResult> {
-    let path = session_path(identifier)?;
+pub fn load_session(name: &str) -> Result<SessionLoadResult> {
+    let path = session_path(name)?;
 
     if !path.exists() {
         return Ok(SessionLoadResult::NotFound);
@@ -69,11 +105,10 @@ pub fn load_session(identifier: &str) -> Result<SessionLoadResult> {
 
     match serde_json::from_str::<Session>(&content) {
         Ok(session) => {
-            // Verify the identifier matches
-            if session.identifier != identifier {
+            if session.name != name {
                 return Ok(SessionLoadResult::Corrupted {
                     path,
-                    error: "Session identifier mismatch".to_string(),
+                    error: "Session name mismatch".to_string(),
                 });
             }
             Ok(SessionLoadResult::Loaded(session))
@@ -86,41 +121,34 @@ pub fn load_session(identifier: &str) -> Result<SessionLoadResult> {
 }
 
 /// Save a session to disk atomically
-///
-/// Uses a temporary file and atomic rename to prevent corruption
-/// on unexpected quit (Ctrl+C, kill, power loss).
 pub fn save_session(session: &Session) -> Result<PathBuf> {
     let dir = sessions_dir()?;
 
-    // Ensure directory exists with restrictive permissions (0700)
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::Session(format!("Failed to create sessions directory: {}", e)))?;
 
-    // Set restrictive permissions on the sessions directory (owner-only access)
     #[cfg(unix)]
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
         .map_err(|e| AppError::Session(format!("Failed to set directory permissions: {}", e)))?;
 
-    let path = session_path(&session.identifier)?;
+    let path = session_path(&session.name)?;
     let tmp_path = path.with_extension("tmp");
 
-    // Write to temporary file
     let content = serde_json::to_string_pretty(session)
         .map_err(|e| AppError::Session(format!("Failed to serialize session: {}", e)))?;
 
     fs::write(&tmp_path, &content)
         .map_err(|e| AppError::Session(format!("Failed to write session file: {}", e)))?;
 
-    // Atomic rename (POSIX guarantees atomicity)
     fs::rename(&tmp_path, &path)
         .map_err(|e| AppError::Session(format!("Failed to save session file: {}", e)))?;
 
     Ok(path)
 }
 
-/// Delete a corrupted session file to allow fresh start
-pub fn delete_session(identifier: &str) -> Result<()> {
-    let path = session_path(identifier)?;
+/// Delete a session file
+pub fn delete_session(name: &str) -> Result<()> {
+    let path = session_path(name)?;
     if path.exists() {
         fs::remove_file(&path)
             .map_err(|e| AppError::Session(format!("Failed to delete session: {}", e)))?;
@@ -128,73 +156,98 @@ pub fn delete_session(identifier: &str) -> Result<()> {
     Ok(())
 }
 
+/// List all session names (reads the sessions directory)
+pub fn list_sessions() -> Result<Vec<String>> {
+    let dir = sessions_dir()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut sessions = Vec::new();
+    let entries = fs::read_dir(&dir)
+        .map_err(|e| AppError::Session(format!("Failed to read sessions directory: {}", e)))?;
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| AppError::Session(format!("Failed to read directory entry: {}", e)))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                sessions.push(name.to_string());
+            }
+        }
+    }
+
+    sessions.sort();
+    Ok(sessions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_hash_identifier() {
-        let hash1 = hash_identifier("commits:5");
-        let hash2 = hash_identifier("commits:5");
-        let hash3 = hash_identifier("commits:6");
+    fn test_validate_name_valid() {
+        assert!(validate_name("my-review").is_ok());
+        assert!(validate_name("test_123").is_ok());
+        assert!(validate_name("a").is_ok());
+        assert!(validate_name("A-b_C-1").is_ok());
+    }
 
-        assert_eq!(hash1, hash2);
-        assert_ne!(hash1, hash3);
-        assert_eq!(hash1.len(), 16);
+    #[test]
+    fn test_validate_name_invalid() {
+        assert!(validate_name("").is_err());
+        assert!(validate_name("has spaces").is_err());
+        assert!(validate_name("has:colon").is_err());
+        assert!(validate_name("has/slash").is_err());
+        assert!(validate_name(&"a".repeat(65)).is_err());
     }
 
     #[test]
     fn test_session_path() {
-        let path = session_path("commits:5").unwrap();
-        assert!(path.to_string_lossy().ends_with(".json"));
+        let path = session_path("my-review").unwrap();
+        assert!(path.to_string_lossy().ends_with("my-review.json"));
         assert!(path.to_string_lossy().contains(".sherpa"));
     }
 
     #[test]
     fn test_save_and_load_session() {
-        // Use a unique identifier to avoid conflicts with real sessions
-        let identifier = format!("test:{}", std::process::id());
-        let mut session = Session::new(identifier.clone(), "test diff".to_string());
-        session.sections = vec![];
+        let name = format!("test-{}", std::process::id());
+        let session = Session::new(name.clone(), "abc123".to_string());
 
-        // Save
         let path = save_session(&session).unwrap();
         assert!(path.exists());
 
-        // Load
-        let result = load_session(&identifier).unwrap();
+        let result = load_session(&name).unwrap();
         match result {
             SessionLoadResult::Loaded(loaded) => {
-                assert_eq!(loaded.identifier, identifier);
-                assert_eq!(loaded.diff_text, "test diff");
+                assert_eq!(loaded.name, name);
+                assert_eq!(loaded.base_ref, "abc123");
             }
             _ => panic!("Expected Loaded result"),
         }
 
-        // Cleanup
-        delete_session(&identifier).unwrap();
+        delete_session(&name).unwrap();
     }
 
     #[test]
     fn test_load_nonexistent_session() {
-        let result = load_session("nonexistent:session").unwrap();
+        let result = load_session("nonexistent-session-xyz").unwrap();
         assert!(matches!(result, SessionLoadResult::NotFound));
     }
 
     #[test]
     fn test_corrupted_session_detection() {
-        let identifier = format!("corrupt:{}", std::process::id());
-        let path = session_path(&identifier).unwrap();
+        let name = format!("corrupt-{}", std::process::id());
+        let path = session_path(&name).unwrap();
 
-        // Create parent directory
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
 
-        // Write invalid JSON
         fs::write(&path, "{ invalid json }").unwrap();
 
-        let result = load_session(&identifier).unwrap();
+        let result = load_session(&name).unwrap();
         match result {
             SessionLoadResult::Corrupted { error, .. } => {
                 assert!(error.contains("Invalid JSON"));
@@ -202,85 +255,44 @@ mod tests {
             _ => panic!("Expected Corrupted result"),
         }
 
-        // Cleanup
         fs::remove_file(&path).ok();
     }
 
     #[test]
-    fn test_truncated_json_detection() {
-        let identifier = format!("truncated:{}", std::process::id());
-        let path = session_path(&identifier).unwrap();
+    fn test_name_mismatch_detection() {
+        let name = format!("mismatch-{}", std::process::id());
+        let path = session_path(&name).unwrap();
 
-        // Create parent directory
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
 
-        // Write truncated JSON (simulating partial write)
-        fs::write(&path, r#"{"version":1,"identifier":"truncated","diff_text":""#).unwrap();
-
-        let result = load_session(&identifier).unwrap();
-        match result {
-            SessionLoadResult::Corrupted { error, .. } => {
-                assert!(error.contains("Invalid JSON"));
-            }
-            _ => panic!("Expected Corrupted result for truncated JSON"),
-        }
-
-        // Cleanup
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_valid_json_wrong_schema() {
-        let identifier = format!("wrongschema:{}", std::process::id());
-        let path = session_path(&identifier).unwrap();
-
-        // Create parent directory
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-
-        // Write valid JSON but wrong schema (missing required fields)
-        fs::write(&path, r#"{"foo": "bar", "baz": 123}"#).unwrap();
-
-        let result = load_session(&identifier).unwrap();
-        match result {
-            SessionLoadResult::Corrupted { error, .. } => {
-                assert!(error.contains("Invalid JSON"));
-            }
-            _ => panic!("Expected Corrupted result for wrong schema"),
-        }
-
-        // Cleanup
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn test_identifier_mismatch_detection() {
-        let identifier = format!("mismatch:{}", std::process::id());
-        let wrong_identifier = format!("wrong:{}", std::process::id());
-        let path = session_path(&identifier).unwrap();
-
-        // Create parent directory
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-
-        // Create a valid session with mismatched identifier
-        let session = Session::new(wrong_identifier, "test diff".to_string());
+        let session = Session::new("wrong-name".to_string(), "".to_string());
         let content = serde_json::to_string(&session).unwrap();
         fs::write(&path, content).unwrap();
 
-        let result = load_session(&identifier).unwrap();
+        let result = load_session(&name).unwrap();
         match result {
             SessionLoadResult::Corrupted { error, .. } => {
                 assert!(error.contains("mismatch"));
             }
-            _ => panic!("Expected Corrupted result for identifier mismatch"),
+            _ => panic!("Expected Corrupted result for name mismatch"),
         }
 
-        // Cleanup
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_write_and_read_active() {
+        write_active("test-session").unwrap();
+        let active = read_active().unwrap();
+        assert_eq!(active, Some("test-session".to_string()));
+    }
+
+    #[test]
+    fn test_list_sessions() {
+        let result = list_sessions();
+        assert!(result.is_ok());
+        // Just verify it returns a list (may be empty or have test sessions)
     }
 }

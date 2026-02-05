@@ -34,9 +34,7 @@ throbber-widgets-tui = "0.10"
 
 # Date/time for export filenames
 chrono = "0.4"
-
-# Timeout for subprocess execution
-wait-timeout = "0.2"
+unidiff = "0.4.0"
 
 [dev-dependencies]
 tempfile = "3"

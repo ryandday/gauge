@@ -9,7 +9,7 @@ use crossterm::terminal::{
 use ratatui::prelude::*;
 use ratatui::Terminal;
 
-use crate::ai::{AiClient, AssessmentResult, ChunkingResult, ClaudeClient};
+use crate::ai::{AiClient, AssessmentResult, ClaudeClient};
 use crate::error::{AppError, Result};
 use crate::models::{AppState, Screen, Session};
 use crate::screens::{
@@ -120,35 +120,10 @@ impl App {
 
     /// Handle retry requests for AI operations
     fn handle_retries(&mut self) {
-        // Handle chunking retry
-        if self.state.ui.needs_chunking_retry {
-            self.state.ui.needs_chunking_retry = false;
-            self.retry_chunking();
-        }
-
         // Handle assessment retry
         if self.state.ui.needs_assessment_retry {
             self.state.ui.needs_assessment_retry = false;
             self.retry_assessment();
-        }
-    }
-
-    /// Retry chunking the diff with AI
-    fn retry_chunking(&mut self) {
-        match self.ai_client.chunk_diff(&self.state.session.diff_text) {
-            ChunkingResult::Success(sections) => {
-                if sections.is_empty() {
-                    self.state
-                        .ui
-                        .set_error("AI returned no sections. The diff may be too small.");
-                } else {
-                    self.state.session.sections = sections;
-                    self.state.goto(Screen::Triage);
-                }
-            }
-            ChunkingResult::Error(e) => {
-                self.state.ui.set_error(e.message);
-            }
         }
     }
 
@@ -162,7 +137,7 @@ impl App {
         let selected_idx = self.state.ui.selected_index;
         let (code, hypothesis) = {
             if let Some(section) = self.state.session.sections.get(selected_idx) {
-                (section.code.clone(), self.state.ui.input_text.clone())
+                (section.code(), self.state.ui.input_text.clone())
             } else {
                 return;
             }
@@ -246,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_app_new() {
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let app = App::new(session);
 
         assert_eq!(app.state().screen, Screen::Loading);
@@ -255,19 +230,19 @@ mod tests {
 
     #[test]
     fn test_app_state_access() {
-        let session = Session::new("test".to_string(), "diff".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut app = App::new(session);
 
-        assert_eq!(app.session().identifier, "test");
-        assert_eq!(app.session().diff_text, "diff");
+        assert_eq!(app.session().name, "test");
+        assert_eq!(app.session().base_ref, "abc123");
 
-        app.session_mut().identifier = "modified".to_string();
-        assert_eq!(app.session().identifier, "modified");
+        app.session_mut().name = "modified".to_string();
+        assert_eq!(app.session().name, "modified");
     }
 
     #[test]
     fn test_screen_transitions() {
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut app = App::new(session);
 
         app.state_mut().goto(Screen::Triage);

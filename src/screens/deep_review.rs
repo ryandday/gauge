@@ -279,7 +279,8 @@ impl DeepReviewScreen {
             frame.render_widget(paragraph, area);
         } else if let Some(section) = section {
             // Show code preview with hint to enter
-            let code_lines: Vec<Line> = highlight_diff_lines(&section.code);
+            let code_text = section.code();
+            let code_lines: Vec<Line> = highlight_diff_lines(&code_text);
 
             let paragraph = Paragraph::new(code_lines)
                 .block(
@@ -367,7 +368,7 @@ mod tests {
     use crate::models::{Assessment, Section, Session, Tag};
 
     fn create_test_state() -> AppState {
-        let mut session = Session::new("test".to_string(), "".to_string());
+        let mut session = Session::new("test".to_string(), "abc123".to_string());
         session.sections = vec![
             Section::new(
                 "s1".to_string(),

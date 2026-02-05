@@ -287,8 +287,12 @@ impl PseudocodeReviewScreen {
 
     fn render_code_panel(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         let section = state.current_section();
+        let code_string;
         let (title, code) = match section {
-            Some(s) => (s.title.as_str(), s.code.as_str()),
+            Some(s) => {
+                code_string = s.code();
+                (s.title.as_str(), code_string.as_str())
+            }
             None => ("No section", ""),
         };
 
@@ -427,7 +431,7 @@ mod tests {
     use crate::models::{Section, Session, Tag};
 
     fn create_test_state() -> AppState {
-        let mut session = Session::new("test".to_string(), "".to_string());
+        let mut session = Session::new("test".to_string(), "abc123".to_string());
         session.sections = vec![Section::new(
             "s1".to_string(),
             "Test Section".to_string(),

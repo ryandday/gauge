@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_loading_screen_handle_quit() {
         let mut screen = LoadingScreen::new();
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut state = AppState::new(session);
 
         let key = KeyEvent::new(
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn test_loading_screen_handle_retry() {
         let mut screen = LoadingScreen::new();
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut state = AppState::new(session);
         state.ui.set_error("Test error");
 
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_loading_screen_retry_ignored_without_error() {
         let mut screen = LoadingScreen::new();
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut state = AppState::new(session);
 
         let key = KeyEvent::new(

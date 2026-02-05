@@ -9,13 +9,13 @@ pub struct Session {
     /// Version for schema migration
     pub version: u32,
 
-    /// Session identifier (commit count or branch mode)
-    pub identifier: String,
+    /// Session name (used as filename)
+    pub name: String,
 
-    /// Raw diff text (for potential re-chunking)
-    pub diff_text: String,
+    /// Merge-base commit hash (diffs computed on demand from this)
+    pub base_ref: String,
 
-    /// Sections chunked by AI (or empty if not yet chunked)
+    /// Sections (created via CLI or loaded)
     pub sections: Vec<Section>,
 
     /// Current review stage
@@ -30,19 +30,33 @@ pub struct Session {
 
 impl Session {
     /// Current schema version
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 2;
 
-    /// Creates a new session with the given identifier
-    pub fn new(identifier: String, diff_text: String) -> Self {
+    /// Creates a new session with the given name and base ref
+    pub fn new(name: String, base_ref: String) -> Self {
         Self {
             version: Self::CURRENT_VERSION,
-            identifier,
-            diff_text,
+            name,
+            base_ref,
             sections: Vec::new(),
             stage: ReviewStage::Loading,
             current_section_index: 0,
             draft_hypothesis: None,
         }
+    }
+
+    /// Auto-generate the next section ID
+    pub fn next_section_id(&self) -> String {
+        let max = self
+            .sections
+            .iter()
+            .filter_map(|s| {
+                s.id.strip_prefix("sec_")
+                    .and_then(|n| n.parse::<usize>().ok())
+            })
+            .max()
+            .unwrap_or(0);
+        format!("sec_{}", max + 1)
     }
 
     /// Get counts of sections by tag
@@ -80,7 +94,7 @@ impl Session {
     }
 
     /// Get all unreviewed sections that need review
-    #[allow(dead_code)] // Reserved for future navigation feature
+    #[allow(dead_code)]
     pub fn sections_needing_deep_review(&self) -> Vec<&Section> {
         self.sections
             .iter()
@@ -101,7 +115,7 @@ impl Session {
     }
 
     /// Check if all deep reviews are complete
-    #[allow(dead_code)] // Reserved for future screen transition gating
+    #[allow(dead_code)]
     pub fn deep_review_complete(&self) -> bool {
         self.sections
             .iter()
@@ -148,10 +162,33 @@ mod tests {
 
     #[test]
     fn test_session_new() {
-        let session = Session::new("commits:5".to_string(), "diff text".to_string());
-        assert_eq!(session.identifier, "commits:5");
+        let session = Session::new("my-review".to_string(), "abc123".to_string());
+        assert_eq!(session.name, "my-review");
+        assert_eq!(session.base_ref, "abc123");
         assert_eq!(session.version, Session::CURRENT_VERSION);
         assert!(session.sections.is_empty());
+    }
+
+    #[test]
+    fn test_next_section_id() {
+        let mut session = Session::new("test".to_string(), "".to_string());
+        assert_eq!(session.next_section_id(), "sec_1");
+
+        session.sections.push(Section::new(
+            "sec_1".to_string(),
+            "T1".to_string(),
+            "".to_string(),
+            "".to_string(),
+        ));
+        assert_eq!(session.next_section_id(), "sec_2");
+
+        session.sections.push(Section::new(
+            "sec_5".to_string(),
+            "T5".to_string(),
+            "".to_string(),
+            "".to_string(),
+        ));
+        assert_eq!(session.next_section_id(), "sec_6");
     }
 
     #[test]
@@ -206,10 +243,11 @@ mod tests {
 
     #[test]
     fn test_session_serialization() {
-        let session = Session::new("commits:3".to_string(), "diff".to_string());
+        let session = Session::new("my-review".to_string(), "abc123".to_string());
         let json = serde_json::to_string(&session).unwrap();
         let deserialized: Session = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.identifier, session.identifier);
+        assert_eq!(deserialized.name, session.name);
+        assert_eq!(deserialized.base_ref, session.base_ref);
     }
 
     #[test]
@@ -240,14 +278,12 @@ mod tests {
     #[test]
     fn test_empty_sections_all_tagged() {
         let session = Session::new("test".to_string(), "".to_string());
-        // Empty sections should be considered "all tagged" (vacuously true)
         assert!(session.all_tagged());
     }
 
     #[test]
     fn test_empty_sections_deep_review_complete() {
         let session = Session::new("test".to_string(), "".to_string());
-        // Empty sections should be considered complete (vacuously true)
         assert!(session.deep_review_complete());
     }
 }

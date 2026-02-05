@@ -233,7 +233,7 @@ impl SummaryScreen {
     }
 
     fn render_session_info(&self, frame: &mut Frame, area: Rect, state: &AppState) {
-        let mut lines = vec![Line::from(format!("Session: {}", state.session.identifier))];
+        let mut lines = vec![Line::from(format!("Session: {}", state.session.name))];
 
         if let Some(path) = &self.exported_path {
             lines.push(Line::styled(
@@ -257,7 +257,9 @@ impl SummaryScreen {
     /// Export the review session to a markdown file
     fn export_markdown(&self, state: &AppState) -> std::result::Result<PathBuf, String> {
         // Use repository root docs/ as default output directory
-        let repo_root = get_repo_root()
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+        let repo_root = get_repo_root(&cwd)
             .map_err(|e| format!("Failed to find repository root: {}", e))?;
         let output_dir = repo_root.join("docs");
         self.export_markdown_to(state, output_dir)
@@ -278,7 +280,7 @@ impl SummaryScreen {
         let mut content = String::new();
 
         // Header
-        content.push_str(&format!("# Code Review: {}\n\n", state.session.identifier));
+        content.push_str(&format!("# Code Review: {}\n\n", state.session.name));
         content.push_str(&format!(
             "Generated: {}\n\n",
             now.format("%Y-%m-%d %H:%M:%S")
@@ -356,7 +358,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn create_test_state() -> AppState {
-        let mut session = Session::new("test-commits:3".to_string(), "".to_string());
+        let mut session = Session::new("test-review".to_string(), "abc123".to_string());
         session.sections = vec![
             Section::new(
                 "s1".to_string(),
@@ -434,7 +436,7 @@ mod tests {
 
         // Verify content
         let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("# Code Review: test-commits:3"));
+        assert!(content.contains("# Code Review: test-review"));
         assert!(content.contains("Section 1"));
         assert!(content.contains("Section 2"));
         assert!(content.contains("My hypothesis"));

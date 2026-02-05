@@ -3,6 +3,8 @@
 pub mod ai;
 pub mod app;
 pub mod cli;
+pub mod commands;
+pub mod diff_parser;
 pub mod error;
 pub mod git;
 pub mod models;

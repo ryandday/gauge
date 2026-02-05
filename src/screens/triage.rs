@@ -227,8 +227,12 @@ impl TriageScreen {
         let selected_idx = self.list_state.selected().unwrap_or(0);
         let section = state.session.sections.get(selected_idx);
 
+        let code_string;
         let (title, description, code) = match section {
-            Some(s) => (s.title.as_str(), s.description.as_str(), s.code.as_str()),
+            Some(s) => {
+                code_string = s.code();
+                (s.title.as_str(), s.description.as_str(), code_string.as_str())
+            }
             None => ("No section selected", "", ""),
         };
 
@@ -314,7 +318,7 @@ mod tests {
     use crate::models::{Section, Session};
 
     fn create_test_state() -> AppState {
-        let mut session = Session::new("test".to_string(), "".to_string());
+        let mut session = Session::new("test".to_string(), "abc123".to_string());
         session.sections = vec![
             Section::new(
                 "s1".to_string(),
@@ -493,7 +497,7 @@ mod tests {
     #[test]
     fn test_triage_screen_empty_sections() {
         let mut screen = TriageScreen::new();
-        let session = Session::new("test".to_string(), "".to_string());
+        let session = Session::new("test".to_string(), "abc123".to_string());
         let mut state = AppState::new(session);
 
         // Navigation should not panic with empty sections
@@ -534,7 +538,7 @@ mod tests {
     #[test]
     fn test_triage_screen_single_section_navigation() {
         let mut screen = TriageScreen::new();
-        let mut session = Session::new("test".to_string(), "".to_string());
+        let mut session = Session::new("test".to_string(), "abc123".to_string());
         session.sections = vec![Section::new(
             "s1".to_string(),
             "Single Section".to_string(),

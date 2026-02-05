@@ -33,6 +33,29 @@ impl Tag {
     }
 }
 
+/// Source of code content for a code block
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CodeSource {
+    Diff {
+        paths: Vec<String>,
+        hunks: Option<Vec<usize>>,
+        lines: Option<(usize, usize)>,
+    },
+    File {
+        path: String,
+        lines: Option<(usize, usize)>,
+    },
+}
+
+/// A block of code content within a section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeBlock {
+    pub id: String,
+    pub source: CodeSource,
+    pub content: String,
+}
+
 /// A logical grouping of related code changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
@@ -45,10 +68,10 @@ pub struct Section {
     /// Brief description of what this section contains
     pub description: String,
 
-    /// The actual code diff for this section
-    pub code: String,
+    /// Code blocks containing the actual code/diff content
+    pub code_blocks: Vec<CodeBlock>,
 
-    /// Files affected by this section
+    /// Files affected by this section (auto-derived from code_blocks)
     pub files: Vec<String>,
 
     /// User's confidence tag
@@ -67,12 +90,55 @@ impl Section {
             id,
             title,
             description,
-            code,
+            code_blocks: if code.is_empty() {
+                Vec::new()
+            } else {
+                vec![CodeBlock {
+                    id: "code_1".to_string(),
+                    source: CodeSource::Diff {
+                        paths: Vec::new(),
+                        hunks: None,
+                        lines: None,
+                    },
+                    content: code,
+                }]
+            },
             files: Vec::new(),
             tag: Tag::default(),
             hypothesis: None,
             assessment: None,
         }
+    }
+
+    /// Returns concatenated content of all code blocks
+    pub fn code(&self) -> String {
+        self.code_blocks
+            .iter()
+            .map(|cb| cb.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Derive files list from code_blocks
+    pub fn derive_files(&mut self) {
+        let mut files = Vec::new();
+        for cb in &self.code_blocks {
+            match &cb.source {
+                CodeSource::Diff { paths, .. } => {
+                    for p in paths {
+                        if !files.contains(p) {
+                            files.push(p.clone());
+                        }
+                    }
+                }
+                CodeSource::File { path, .. } => {
+                    if !files.contains(path) {
+                        files.push(path.clone());
+                    }
+                }
+            }
+        }
+        self.files = files;
     }
 
     /// Returns true if this section needs deep review (shaky or lost)
@@ -83,6 +149,21 @@ impl Section {
     /// Returns true if this section has been reviewed (has an assessment)
     pub fn is_reviewed(&self) -> bool {
         self.assessment.is_some()
+    }
+
+    /// Auto-generate the next code block ID
+    pub fn next_code_id(&self) -> String {
+        let max = self
+            .code_blocks
+            .iter()
+            .filter_map(|cb| {
+                cb.id
+                    .strip_prefix("code_")
+                    .and_then(|n| n.parse::<usize>().ok())
+            })
+            .max()
+            .unwrap_or(0);
+        format!("code_{}", max + 1)
     }
 }
 
@@ -134,6 +215,89 @@ mod tests {
     }
 
     #[test]
+    fn test_section_code_concatenation() {
+        let mut section = Section::new(
+            "s1".to_string(),
+            "Test".to_string(),
+            "Desc".to_string(),
+            String::new(),
+        );
+        section.code_blocks = vec![
+            CodeBlock {
+                id: "code_1".to_string(),
+                source: CodeSource::Diff {
+                    paths: vec!["a.rs".to_string()],
+                    hunks: None,
+                    lines: None,
+                },
+                content: "block 1".to_string(),
+            },
+            CodeBlock {
+                id: "code_2".to_string(),
+                source: CodeSource::File {
+                    path: "b.rs".to_string(),
+                    lines: None,
+                },
+                content: "block 2".to_string(),
+            },
+        ];
+        assert_eq!(section.code(), "block 1\nblock 2");
+    }
+
+    #[test]
+    fn test_section_derive_files() {
+        let mut section = Section::new(
+            "s1".to_string(),
+            "Test".to_string(),
+            "Desc".to_string(),
+            String::new(),
+        );
+        section.code_blocks = vec![
+            CodeBlock {
+                id: "code_1".to_string(),
+                source: CodeSource::Diff {
+                    paths: vec!["a.rs".to_string(), "b.rs".to_string()],
+                    hunks: None,
+                    lines: None,
+                },
+                content: "".to_string(),
+            },
+            CodeBlock {
+                id: "code_2".to_string(),
+                source: CodeSource::File {
+                    path: "a.rs".to_string(),
+                    lines: None,
+                },
+                content: "".to_string(),
+            },
+        ];
+        section.derive_files();
+        assert_eq!(section.files, vec!["a.rs", "b.rs"]);
+    }
+
+    #[test]
+    fn test_next_code_id() {
+        let mut section = Section::new(
+            "s1".to_string(),
+            "Test".to_string(),
+            "Desc".to_string(),
+            String::new(),
+        );
+        assert_eq!(section.next_code_id(), "code_1");
+
+        section.code_blocks.push(CodeBlock {
+            id: "code_1".to_string(),
+            source: CodeSource::Diff {
+                paths: vec![],
+                hunks: None,
+                lines: None,
+            },
+            content: "".to_string(),
+        });
+        assert_eq!(section.next_code_id(), "code_2");
+    }
+
+    #[test]
     fn test_section_serialization() {
         let section = Section::new(
             "s1".to_string(),
@@ -151,10 +315,9 @@ mod tests {
 
     #[test]
     fn test_section_serialization_special_chars() {
-        // Test Unicode, escape sequences, quotes, and special characters
         let section = Section::new(
             "s1".to_string(),
-            "日本語タイトル 🚀".to_string(), // Japanese + emoji
+            "日本語タイトル 🚀".to_string(),
             "\"quotes\" and 'apostrophes' with\nnewlines".to_string(),
             r#"fn main() { println!("Hello, 世界!"); }"#.to_string(),
         );
@@ -164,6 +327,6 @@ mod tests {
 
         assert_eq!(deserialized.title, "日本語タイトル 🚀");
         assert!(deserialized.description.contains("\"quotes\""));
-        assert!(deserialized.code.contains("世界"));
+        assert!(deserialized.code().contains("世界"));
     }
 }
