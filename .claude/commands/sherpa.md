@@ -1,5 +1,11 @@
 Analyze the current git diff and create a structured sherpa review session for the TUI.
 
+Arguments: $ARGUMENTS
+
+Parse the arguments for `--base <ref>`. The `<ref>` can be a branch name (e.g., `main`),
+a commit hash (e.g., `abc123`), or a relative reference (e.g., `HEAD~2`). If `--base` is
+not provided, default to `main`. Use this ref as `BASE_REF` throughout.
+
 You are building a code review walkthrough. The goal is to break a branch's changes into
 logical sections that a reviewer can step through one at a time in the TUI, understanding
 each piece before moving to the next. Think of it like creating a guided tour of the PR.
@@ -8,8 +14,8 @@ each piece before moving to the next. Think of it like creating a guided tour of
 
 Before touching the CLI, get the full picture:
 
-1. Run `git diff --stat $(git merge-base main HEAD)..HEAD` to see which files changed and how much.
-2. Run `git log --oneline $(git merge-base main HEAD)..HEAD` to see the commit history.
+1. Run `git diff --stat $(git merge-base <BASE_REF> HEAD)..HEAD` to see which files changed and how much.
+2. Run `git log --oneline $(git merge-base <BASE_REF> HEAD)..HEAD` to see the commit history.
 3. Read changed files as needed to understand the intent — don't just look at diffs in isolation.
    Understand *why* the changes were made, not just *what* changed.
 
@@ -19,7 +25,7 @@ Derive a session name from the branch name. Sanitize it to only contain alphanum
 hyphens, and underscores (e.g., `feature/add-auth` becomes `feature-add-auth`).
 
 ```
-sherpa init <session-name>
+sherpa init <session-name> --base <BASE_REF>
 ```
 
 ## Step 2: Preview diffs per file
