@@ -44,15 +44,28 @@ pub fn session_path(name: &str) -> Result<PathBuf> {
     Ok(dir.join(format!("{}.json", name)))
 }
 
-/// Get the path for the active session file
-fn active_path() -> Result<PathBuf> {
+/// Get the active session directory (~/.sherpa/active/)
+fn active_dir() -> Result<PathBuf> {
     Ok(sherpa_dir()?.join("active"))
 }
 
-/// Write the active session name
-pub fn write_active(name: &str) -> Result<()> {
-    let path = active_path()?;
+/// Get the path for a context-specific active session file
+fn active_path(context_key: &str) -> Result<PathBuf> {
+    Ok(active_dir()?.join(context_key))
+}
+
+/// Write the active session name for a given context key
+pub fn write_active(name: &str, context_key: &str) -> Result<()> {
+    let path = active_path(context_key)?;
     let dir = path.parent().unwrap();
+
+    // Migration: if the old ~/.sherpa/active exists as a plain file, remove it
+    // so we can create the directory in its place.
+    if dir.exists() && !dir.is_dir() {
+        fs::remove_file(dir)
+            .map_err(|e| AppError::Session(format!("Failed to remove old active file: {}", e)))?;
+    }
+
     fs::create_dir_all(dir)
         .map_err(|e| AppError::Session(format!("Failed to create sherpa directory: {}", e)))?;
     fs::write(&path, name)
@@ -60,9 +73,9 @@ pub fn write_active(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Read the active session name
-pub fn read_active() -> Result<Option<String>> {
-    let path = active_path()?;
+/// Read the active session name for a given context key
+pub fn read_active(context_key: &str) -> Result<Option<String>> {
+    let path = active_path(context_key)?;
     if !path.exists() {
         return Ok(None);
     }
@@ -284,9 +297,18 @@ mod tests {
 
     #[test]
     fn test_write_and_read_active() {
-        write_active("test-session").unwrap();
-        let active = read_active().unwrap();
+        let key = "test_context_key";
+        write_active("test-session", key).unwrap();
+        let active = read_active(key).unwrap();
         assert_eq!(active, Some("test-session".to_string()));
+
+        // Different key returns None
+        let other = read_active("other_key").unwrap();
+        assert_eq!(other, None);
+
+        // Clean up
+        let path = active_path(key).unwrap();
+        fs::remove_file(&path).ok();
     }
 
     #[test]

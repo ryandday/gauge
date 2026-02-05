@@ -16,9 +16,22 @@ fn cwd() -> Result<PathBuf> {
         .map_err(|e| AppError::Git(format!("Failed to get current directory: {}", e)))
 }
 
+/// Compute a context key from repo root + current branch, so each
+/// repo+branch combination gets its own active session pointer.
+fn active_context_key() -> Result<String> {
+    let dir = cwd()?;
+    let repo_root = git::get_repo_root(&dir)?;
+    let branch = git::get_current_branch(&dir)?;
+    let key = format!("{}:{}", repo_root.display(), branch);
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
 /// Load the active session or error
 fn load_active_session() -> Result<Session> {
-    let name = read_active()?
+    let name = read_active(&active_context_key()?)?
         .ok_or_else(|| AppError::Session("No active session. Run 'sherpa init <name>' first.".to_string()))?;
     match load_session(&name)? {
         SessionLoadResult::Loaded(session) => Ok(session),
@@ -34,8 +47,8 @@ fn load_active_session() -> Result<Session> {
     }
 }
 
-/// sherpa init <name>
-pub fn init(name: &str) -> Result<()> {
+/// sherpa init <name> [--base <ref>]
+pub fn init(name: &str, base: Option<&str>) -> Result<()> {
     validate_name(name)?;
 
     // Check if session already exists
@@ -53,12 +66,15 @@ pub fn init(name: &str) -> Result<()> {
         SessionLoadResult::NotFound => {}
     }
 
-    // Compute merge-base
-    let base_ref = git::compute_merge_base(&cwd()?)?;
+    let dir = cwd()?;
+    let base_ref = match base {
+        Some(reference) => git::resolve_ref(&dir, reference)?,
+        None => git::compute_merge_base(&dir)?,
+    };
 
     let session = Session::new(name.to_string(), base_ref.clone());
     save_session(&session)?;
-    write_active(name)?;
+    write_active(name, &active_context_key()?)?;
 
     eprintln!("Session '{}' created (base: {})", name, &base_ref[..12.min(base_ref.len())]);
     Ok(())
@@ -84,7 +100,7 @@ pub fn open(name: &str) -> Result<()> {
     };
 
     // Set as active
-    write_active(name)?;
+    write_active(name, &active_context_key()?)?;
 
     let mut app = App::new(session);
 
@@ -114,7 +130,7 @@ pub fn open(name: &str) -> Result<()> {
 /// sherpa list
 pub fn list() -> Result<()> {
     let sessions = list_sessions()?;
-    let active = read_active()?;
+    let active = read_active(&active_context_key()?)?;
 
     if sessions.is_empty() {
         eprintln!("No sessions found.");

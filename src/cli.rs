@@ -15,6 +15,9 @@ pub enum Command {
     Init {
         /// Session name (alphanumeric, hyphens, underscores)
         name: String,
+        /// Base git ref (branch, tag, commit, HEAD~N). Defaults to merge-base with default branch.
+        #[arg(long)]
+        base: Option<String>,
     },
     /// Launch TUI for a session
     Open {
@@ -194,7 +197,22 @@ mod tests {
     fn test_parse_init() {
         let cli = Cli::try_parse_from(["sherpa", "init", "my-review"]).unwrap();
         match cli.command {
-            Command::Init { name } => assert_eq!(name, "my-review"),
+            Command::Init { name, base } => {
+                assert_eq!(name, "my-review");
+                assert!(base.is_none());
+            }
+            _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_init_with_base() {
+        let cli = Cli::try_parse_from(["sherpa", "init", "my-review", "--base", "HEAD~2"]).unwrap();
+        match cli.command {
+            Command::Init { name, base } => {
+                assert_eq!(name, "my-review");
+                assert_eq!(base, Some("HEAD~2".to_string()));
+            }
             _ => panic!("Expected Init command"),
         }
     }

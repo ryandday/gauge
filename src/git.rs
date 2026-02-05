@@ -107,6 +107,26 @@ pub fn compute_merge_base(dir: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Resolve an arbitrary ref (branch, tag, HEAD~2, hash) to a full commit hash
+pub fn resolve_ref(dir: &Path, reference: &str) -> Result<String> {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", reference])
+        .output()
+        .map_err(|e| AppError::Git(format!("Failed to run git: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Git(format!(
+            "Failed to resolve ref '{}': {}",
+            reference,
+            stderr.trim()
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Run `git diff <base_ref>..HEAD -- <path>` and return the diff text
 pub fn diff_file(dir: &Path, base_ref: &str, path: &str) -> Result<String> {
     let output = Command::new("git")

@@ -29,7 +29,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Init { name } => commands::init(&name),
+        Command::Init { name, base } => commands::init(&name, base.as_deref()),
         Command::Open { name } => commands::open(&name),
         Command::List => commands::list(),
         Command::Done => commands::done(),
