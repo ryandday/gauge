@@ -287,16 +287,17 @@ impl PseudocodeReviewScreen {
 
     fn render_code_panel(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         let section = state.current_section();
-        let code_string;
-        let (title, code) = match section {
-            Some(s) => {
-                code_string = s.code();
-                (s.title.as_str(), code_string.as_str())
-            }
-            None => ("No section", ""),
+        let title = match section {
+            Some(s) => s.title.as_str(),
+            None => "No section",
+        };
+        let empty_blocks = Vec::new();
+        let blocks = match section {
+            Some(s) => &s.code_blocks,
+            None => &empty_blocks,
         };
 
-        let code_lines: Vec<Line> = highlight_diff_lines(code);
+        let code_lines: Vec<Line> = highlight_diff_lines(blocks);
 
         let code_para = Paragraph::new(code_lines)
             .block(Block::default().borders(Borders::ALL).title(title))

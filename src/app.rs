@@ -47,6 +47,7 @@ impl App {
     }
 
     /// Get a mutable reference to the current session
+    #[allow(dead_code)]
     pub fn session_mut(&mut self) -> &mut Session {
         &mut self.state.session
     }

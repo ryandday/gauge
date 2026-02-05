@@ -4,6 +4,7 @@ use crate::models::{Assessment, Section};
 
 /// Result of AI diff chunking operation
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ChunkingResult {
     /// Successfully chunked the diff into sections
     Success(Vec<Section>),
@@ -26,11 +27,13 @@ impl ChunkingResult {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ChunkingError {
     pub message: String,
     pub raw_output: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ChunkingError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {

@@ -10,6 +10,7 @@ pub struct Hunk {
     /// The full hunk content (header + lines)
     pub content: String,
     /// Starting line in the old file
+    #[allow(dead_code)]
     pub old_start: usize,
     /// Starting line in the new file
     pub new_start: usize,

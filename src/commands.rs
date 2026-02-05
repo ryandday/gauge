@@ -373,7 +373,7 @@ fn resolve_content(
     lines_str: Option<&str>,
 ) -> Result<(CodeSource, String)> {
     let lines = match lines_str {
-        Some(s) => Some(parse_line_range(s).map_err(|e| AppError::Session(e))?),
+        Some(s) => Some(parse_line_range(s).map_err(AppError::Session)?),
         None => None,
     };
 

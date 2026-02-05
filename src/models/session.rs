@@ -89,6 +89,7 @@ impl Session {
     }
 
     /// Get sections that need review (shaky or lost)
+    #[allow(dead_code)]
     pub fn sections_needing_review(&self) -> Vec<&Section> {
         self.sections.iter().filter(|s| s.needs_review()).collect()
     }
@@ -110,6 +111,7 @@ impl Session {
     }
 
     /// Check if triage is complete and can proceed
+    #[allow(dead_code)]
     pub fn can_proceed_from_triage(&self) -> bool {
         self.all_tagged()
     }

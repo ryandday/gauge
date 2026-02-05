@@ -4,7 +4,7 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
 
 use super::{
     handle_error_state_input, handle_scroll_input, highlight_diff_lines, render_error_panel,
-    render_footer_hints, ErrorInputResult, ScreenTrait,
+    render_footer_hints, wrapped_height, ErrorInputResult, ScreenTrait,
 };
 use crate::error::Result;
 use crate::models::{AppState, Screen};
@@ -90,14 +90,28 @@ impl ScreenTrait for DeepReviewScreen {
             return;
         }
 
+        // Compute dynamic description height
+        let idx = self
+            .current_review_index
+            .min(needs_review.len().saturating_sub(1));
+        let description = needs_review
+            .get(idx)
+            .map(|(_, s)| s.description.as_str())
+            .unwrap_or("");
+        let inner_width = area.width.saturating_sub(2);
+        let text_lines = wrapped_height(description, inner_width);
+        let desc_height = (text_lines + 2) // +2 for borders
+            .max(3)                         // at least 1 line + borders
+            .min(area.height / 2);          // cap at half screen
+
         // Main layout
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Progress bar
-                Constraint::Length(4), // Section header
-                Constraint::Min(0),    // Content area
-                Constraint::Length(2), // Footer hints
+                Constraint::Length(3),           // Progress bar
+                Constraint::Length(desc_height), // Section header (dynamic)
+                Constraint::Min(0),              // Content area
+                Constraint::Length(2),            // Footer hints
             ])
             .split(area);
 
@@ -279,8 +293,7 @@ impl DeepReviewScreen {
             frame.render_widget(paragraph, area);
         } else if let Some(section) = section {
             // Show code preview with hint to enter
-            let code_text = section.code();
-            let code_lines: Vec<Line> = highlight_diff_lines(&code_text);
+            let code_lines: Vec<Line> = highlight_diff_lines(&section.code_blocks);
 
             let paragraph = Paragraph::new(code_lines)
                 .block(
