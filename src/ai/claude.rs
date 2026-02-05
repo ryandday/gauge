@@ -83,7 +83,7 @@ impl AiClient for ClaudeClient {
     fn chunk_diff(&mut self, _diff: &str) -> ChunkingResult {
         // Chunking is no longer done via AI - sections are created manually via CLI
         ChunkingResult::Error(ChunkingError::new(
-            "AI chunking is no longer supported. Use 'sherpa section add' instead.",
+            "AI chunking is no longer supported. Use 'gauge section add' instead.",
         ))
     }
 

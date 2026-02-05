@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "sherpa")]
+#[command(name = "gauge")]
 #[command(about = "Interactive code review TUI for understanding diffs")]
 #[command(version)]
 pub struct Cli {
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_parse_init() {
-        let cli = Cli::try_parse_from(["sherpa", "init", "my-review"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "init", "my-review"]).unwrap();
         match cli.command {
             Command::Init { name, base } => {
                 assert_eq!(name, "my-review");
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_parse_init_with_base() {
-        let cli = Cli::try_parse_from(["sherpa", "init", "my-review", "--base", "HEAD~2"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "init", "my-review", "--base", "HEAD~2"]).unwrap();
         match cli.command {
             Command::Init { name, base } => {
                 assert_eq!(name, "my-review");
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_parse_open() {
-        let cli = Cli::try_parse_from(["sherpa", "open", "my-review"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "open", "my-review"]).unwrap();
         match cli.command {
             Command::Open { name } => assert_eq!(name, "my-review"),
             _ => panic!("Expected Open command"),
@@ -228,20 +228,20 @@ mod tests {
 
     #[test]
     fn test_parse_list() {
-        let cli = Cli::try_parse_from(["sherpa", "list"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "list"]).unwrap();
         assert!(matches!(cli.command, Command::List));
     }
 
     #[test]
     fn test_parse_done() {
-        let cli = Cli::try_parse_from(["sherpa", "done"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "done"]).unwrap();
         assert!(matches!(cli.command, Command::Done));
     }
 
     #[test]
     fn test_parse_section_add() {
         let cli = Cli::try_parse_from([
-            "sherpa", "section", "add",
+            "gauge", "section", "add",
             "--title", "Models",
             "--description", "Core types",
         ]).unwrap();
@@ -256,14 +256,14 @@ mod tests {
 
     #[test]
     fn test_parse_section_list() {
-        let cli = Cli::try_parse_from(["sherpa", "section", "list"]).unwrap();
+        let cli = Cli::try_parse_from(["gauge", "section", "list"]).unwrap();
         assert!(matches!(cli.command, Command::Section { action: SectionAction::List }));
     }
 
     #[test]
     fn test_parse_code_add_only() {
         let cli = Cli::try_parse_from([
-            "sherpa", "code", "add", "sec_1",
+            "gauge", "code", "add", "sec_1",
             "--only", "src/main.rs",
             "--hunks", "1,2",
         ]).unwrap();
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_parse_code_add_file() {
         let cli = Cli::try_parse_from([
-            "sherpa", "code", "add", "sec_1",
+            "gauge", "code", "add", "sec_1",
             "--file", "src/main.rs",
             "--lines", "5-20",
         ]).unwrap();
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn test_parse_diff_preview() {
         let cli = Cli::try_parse_from([
-            "sherpa", "diff", "preview", "--only", "src/main.rs",
+            "gauge", "diff", "preview", "--only", "src/main.rs",
         ]).unwrap();
         match cli.command {
             Command::Diff { action: DiffAction::Preview { only } } => {
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn test_parse_section_reorder() {
         let cli = Cli::try_parse_from([
-            "sherpa", "section", "reorder", "sec_2", "sec_1",
+            "gauge", "section", "reorder", "sec_2", "sec_1",
         ]).unwrap();
         match cli.command {
             Command::Section { action: SectionAction::Reorder { ids } } => {
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn test_parse_code_delete() {
         let cli = Cli::try_parse_from([
-            "sherpa", "code", "delete", "sec_1", "code_2",
+            "gauge", "code", "delete", "sec_1", "code_2",
         ]).unwrap();
         match cli.command {
             Command::Code { action: CodeAction::Delete { section_id, code_id } } => {

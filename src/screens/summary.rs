@@ -268,7 +268,7 @@ impl SummaryScreen {
     /// Export the review session to a markdown file in the specified directory
     fn export_markdown_to(&self, state: &AppState, output_dir: PathBuf) -> std::result::Result<PathBuf, String> {
         let now = Local::now();
-        let filename = format!("sherpa-review-{}.md", now.format("%Y-%m-%d-%H%M%S"));
+        let filename = format!("gauge-review-{}.md", now.format("%Y-%m-%d-%H%M%S"));
 
         if !output_dir.exists() {
             fs::create_dir_all(&output_dir)
@@ -431,7 +431,7 @@ mod tests {
 
         let path = result.unwrap();
         assert!(path.exists());
-        assert!(path.to_string_lossy().contains("sherpa-review"));
+        assert!(path.to_string_lossy().contains("gauge-review"));
         assert!(path.to_string_lossy().ends_with(".md"));
 
         // Verify content

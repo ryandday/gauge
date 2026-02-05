@@ -1,4 +1,4 @@
-//! Library crate exposing sherpa modules for testing and potential reuse as a library.
+//! Library crate exposing gauge modules for testing and potential reuse as a library.
 
 pub mod ai;
 pub mod app;

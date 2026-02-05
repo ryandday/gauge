@@ -1,4 +1,4 @@
-Analyze the current git diff and create a structured sherpa review session for the TUI.
+Analyze the current git diff and create a structured gauge review session for the TUI.
 
 Arguments: $ARGUMENTS
 
@@ -25,7 +25,7 @@ Derive a session name from the branch name. Sanitize it to only contain alphanum
 hyphens, and underscores (e.g., `feature/add-auth` becomes `feature-add-auth`).
 
 ```
-sherpa init <session-name> --base <BASE_REF>
+gauge init <session-name> --base <BASE_REF>
 ```
 
 ## Step 2: Preview diffs per file
@@ -33,7 +33,7 @@ sherpa init <session-name> --base <BASE_REF>
 For each changed file, preview its diff with numbered hunks:
 
 ```
-sherpa diff preview --only <file-path>
+gauge diff preview --only <file-path>
 ```
 
 This shows each hunk with its index number, line counts, and position. Use this output to
@@ -70,24 +70,24 @@ For each planned section:
 
 ### Create the section
 ```
-sherpa section add --title "Section title" --description "What this section does and why"
+gauge section add --title "Section title" --description "What this section does and why"
 ```
 This prints the section ID (e.g., `sec_1`). Use this ID for adding code blocks.
 
 ### Add code blocks from diffs
 For diff content (changes between base branch and HEAD):
 ```
-sherpa code add <sec_id> --only <file-path>                     # Full file diff
-sherpa code add <sec_id> --only <file-path> --hunks 1,3         # Specific hunks (1-based)
-sherpa code add <sec_id> --only <file-path> --lines 10-50       # Specific line range
+gauge code add <sec_id> --only <file-path>                     # Full file diff
+gauge code add <sec_id> --only <file-path> --hunks 1,3         # Specific hunks (1-based)
+gauge code add <sec_id> --only <file-path> --lines 10-50       # Specific line range
 ```
 
 ### Add code blocks from files (for context)
 When the reviewer needs to see surrounding code that didn't change (e.g., a struct definition
 that existing diff code references):
 ```
-sherpa code add <sec_id> --file <file-path>                     # Full file
-sherpa code add <sec_id> --file <file-path> --lines 1-30        # Line range
+gauge code add <sec_id> --file <file-path>                     # Full file
+gauge code add <sec_id> --file <file-path> --lines 1-30        # Line range
 ```
 
 ### Tips for code blocks
@@ -104,24 +104,24 @@ sherpa code add <sec_id> --file <file-path> --lines 1-30        # Line range
 
 Review what you built:
 ```
-sherpa section list                    # See all sections with code block counts
-sherpa section show <sec_id>           # Check a section's details
-sherpa code list <sec_id>              # See code blocks in a section
-sherpa code show <sec_id> <code_id>    # View actual code content
+gauge section list                    # See all sections with code block counts
+gauge section show <sec_id>           # Check a section's details
+gauge code list <sec_id>              # See code blocks in a section
+gauge code show <sec_id> <code_id>    # View actual code content
 ```
 
 If something looks wrong:
 ```
-sherpa section update <sec_id> --title "Better title" --description "Better description"
-sherpa section reorder sec_3 sec_1 sec_2       # Reorder sections
-sherpa code reorder <sec_id> code_2 code_1     # Reorder code blocks within a section
-sherpa code delete <sec_id> <code_id>          # Remove a code block
-sherpa section delete <sec_id>                 # Remove a section entirely
+gauge section update <sec_id> --title "Better title" --description "Better description"
+gauge section reorder sec_3 sec_1 sec_2       # Reorder sections
+gauge code reorder <sec_id> code_2 code_1     # Reorder code blocks within a section
+gauge code delete <sec_id> <code_id>          # Remove a code block
+gauge section delete <sec_id>                 # Remove a section entirely
 ```
 
 When everything looks good:
 ```
-sherpa done
+gauge done
 ```
 
 ## Step 6: Tell the user
@@ -130,12 +130,12 @@ Report what you created:
 - Session name
 - Number of sections and total code blocks
 - A brief table of sections: ID, title, number of code blocks, files involved
-- Tell the user to launch the TUI: `sherpa open <session-name>`
+- Tell the user to launch the TUI: `gauge open <session-name>`
 
 ## Important guidelines
 
 - **Every changed hunk should appear in exactly one section.** Don't skip changes and don't
-  duplicate them. Run `sherpa diff preview --only <file>` for each file and track which hunks
+  duplicate them. Run `gauge diff preview --only <file>` for each file and track which hunks
   you've assigned.
 - **Prefer smaller, focused sections over large catch-all ones.** "Miscellaneous changes" is a
   sign of poor grouping — find the common thread or split further.

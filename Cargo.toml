@@ -1,6 +1,6 @@
 # @task(P1-T1) Initialize Rust project with dependencies
 [package]
-name = "sherpa"
+name = "gauge"
 version = "0.1.0"
 edition = "2021"
 description = "Interactive code review TUI for understanding diffs"
@@ -8,7 +8,7 @@ license = "MIT"
 authors = ["Ryan Day"]
 
 [[bin]]
-name = "sherpa"
+name = "gauge"
 path = "src/main.rs"
 
 [dependencies]

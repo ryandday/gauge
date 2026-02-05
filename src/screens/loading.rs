@@ -60,7 +60,7 @@ impl ScreenTrait for LoadingScreen {
             render_error_panel(
                 frame,
                 content_area,
-                "Sherpa",
+                "Gauge",
                 error,
                 "Press 'r' to retry or 'q' to quit\nIf this persists, check your input format.",
             );
@@ -73,7 +73,7 @@ impl ScreenTrait for LoadingScreen {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title("Sherpa")
+                .title("Gauge")
                 .border_style(Style::default().fg(Color::Cyan));
 
             // Render block first, then throbber inside

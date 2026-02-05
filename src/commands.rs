@@ -32,7 +32,7 @@ fn active_context_key() -> Result<String> {
 /// Load the active session or error
 fn load_active_session() -> Result<Session> {
     let name = read_active(&active_context_key()?)?
-        .ok_or_else(|| AppError::Session("No active session. Run 'sherpa init <name>' first.".to_string()))?;
+        .ok_or_else(|| AppError::Session("No active session. Run 'gauge init <name>' first.".to_string()))?;
     match load_session(&name)? {
         SessionLoadResult::Loaded(session) => Ok(session),
         SessionLoadResult::Corrupted { path, error } => Err(AppError::Session(format!(
@@ -41,13 +41,13 @@ fn load_active_session() -> Result<Session> {
             error
         ))),
         SessionLoadResult::NotFound => Err(AppError::Session(format!(
-            "Active session '{}' not found. Run 'sherpa init <name>' to create one.",
+            "Active session '{}' not found. Run 'gauge init <name>' to create one.",
             name
         ))),
     }
 }
 
-/// sherpa init <name> [--base <ref>]
+/// gauge init <name> [--base <ref>]
 pub fn init(name: &str, base: Option<&str>) -> Result<()> {
     validate_name(name)?;
 
@@ -80,7 +80,7 @@ pub fn init(name: &str, base: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// sherpa open <name>
+/// gauge open <name>
 pub fn open(name: &str) -> Result<()> {
     let session = match load_session(name)? {
         SessionLoadResult::Loaded(session) => session,
@@ -93,7 +93,7 @@ pub fn open(name: &str) -> Result<()> {
         }
         SessionLoadResult::NotFound => {
             return Err(AppError::Session(format!(
-                "Session '{}' not found. Run 'sherpa init {}' first.",
+                "Session '{}' not found. Run 'gauge init {}' first.",
                 name, name
             )));
         }
@@ -127,7 +127,7 @@ pub fn open(name: &str) -> Result<()> {
     result
 }
 
-/// sherpa list
+/// gauge list
 pub fn list() -> Result<()> {
     let sessions = list_sessions()?;
     let active = read_active(&active_context_key()?)?;
@@ -170,7 +170,7 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
-/// sherpa done
+/// gauge done
 pub fn done() -> Result<()> {
     let mut session = load_active_session()?;
 
@@ -190,7 +190,7 @@ pub fn done() -> Result<()> {
     Ok(())
 }
 
-/// sherpa section <action>
+/// gauge section <action>
 pub fn section(action: SectionAction) -> Result<()> {
     match action {
         SectionAction::Add { title, description } => section_add(&title, &description),
@@ -325,7 +325,7 @@ fn section_update(id: &str, title: Option<&str>, description: Option<&str>) -> R
     Ok(())
 }
 
-/// sherpa code <action>
+/// gauge code <action>
 pub fn code(action: CodeAction) -> Result<()> {
     match action {
         CodeAction::Add {
@@ -628,7 +628,7 @@ fn code_update(
     Ok(())
 }
 
-/// sherpa diff <action>
+/// gauge diff <action>
 pub fn diff(action: DiffAction) -> Result<()> {
     match action {
         DiffAction::Preview { only } => diff_preview(&only),

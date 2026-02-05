@@ -5,8 +5,8 @@
 //! - Session resume functionality
 //! - Markdown export
 
-use sherpa::models::{Assessment, CodeBlock, CodeSource, ReviewStage, Section, Session, Tag};
-use sherpa::session::{delete_session, load_session, save_session, SessionLoadResult};
+use gauge::models::{Assessment, CodeBlock, CodeSource, ReviewStage, Section, Session, Tag};
+use gauge::session::{delete_session, load_session, save_session, SessionLoadResult};
 
 /// Helper to create a test session with sections
 fn create_test_session(name: &str) -> Session {

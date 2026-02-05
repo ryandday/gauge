@@ -26,16 +26,16 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Get the sherpa directory (~/.sherpa/)
-pub fn sherpa_dir() -> Result<PathBuf> {
+/// Get the gauge directory (~/.gauge/)
+pub fn gauge_dir() -> Result<PathBuf> {
     let home = dirs::home_dir()
         .ok_or_else(|| AppError::Session("Could not find home directory".to_string()))?;
-    Ok(home.join(".sherpa"))
+    Ok(home.join(".gauge"))
 }
 
-/// Get the sessions directory (~/.sherpa/sessions/)
+/// Get the sessions directory (~/.gauge/sessions/)
 pub fn sessions_dir() -> Result<PathBuf> {
-    Ok(sherpa_dir()?.join("sessions"))
+    Ok(gauge_dir()?.join("sessions"))
 }
 
 /// Get the path for a session file
@@ -44,9 +44,9 @@ pub fn session_path(name: &str) -> Result<PathBuf> {
     Ok(dir.join(format!("{}.json", name)))
 }
 
-/// Get the active session directory (~/.sherpa/active/)
+/// Get the active session directory (~/.gauge/active/)
 fn active_dir() -> Result<PathBuf> {
-    Ok(sherpa_dir()?.join("active"))
+    Ok(gauge_dir()?.join("active"))
 }
 
 /// Get the path for a context-specific active session file
@@ -59,15 +59,8 @@ pub fn write_active(name: &str, context_key: &str) -> Result<()> {
     let path = active_path(context_key)?;
     let dir = path.parent().unwrap();
 
-    // Migration: if the old ~/.sherpa/active exists as a plain file, remove it
-    // so we can create the directory in its place.
-    if dir.exists() && !dir.is_dir() {
-        fs::remove_file(dir)
-            .map_err(|e| AppError::Session(format!("Failed to remove old active file: {}", e)))?;
-    }
-
     fs::create_dir_all(dir)
-        .map_err(|e| AppError::Session(format!("Failed to create sherpa directory: {}", e)))?;
+        .map_err(|e| AppError::Session(format!("Failed to create gauge directory: {}", e)))?;
     fs::write(&path, name)
         .map_err(|e| AppError::Session(format!("Failed to write active session: {}", e)))?;
     Ok(())
@@ -220,7 +213,7 @@ mod tests {
     fn test_session_path() {
         let path = session_path("my-review").unwrap();
         assert!(path.to_string_lossy().ends_with("my-review.json"));
-        assert!(path.to_string_lossy().contains(".sherpa"));
+        assert!(path.to_string_lossy().contains(".gauge"));
     }
 
     #[test]

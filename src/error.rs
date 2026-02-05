@@ -1,4 +1,4 @@
-//! Error types and Result alias for unified error handling across the sherpa application.
+//! Error types and Result alias for unified error handling across the gauge application.
 
 use thiserror::Error;
 
